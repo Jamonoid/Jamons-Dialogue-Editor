@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dialogue Forge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <!-- TOOLBAR -->
+      <header id="toolbar">
+        <div class="logo">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+              stroke="url(#logoGrad)"
+            />
+            <defs>
+              <linearGradient id="logoGrad" x1="0" y1="0" x2="24" y2="24">
+                <stop stop-color="#6c5ce7" />
+                <stop offset="1" stop-color="#00cec9" />
+              </linearGradient>
+            </defs>
+          </svg>
+          Dialogue Forge
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+          <button class="toolbar-btn" id="btn-file-open" title="Abrir archivo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            Abrir
+          </button>
+          <button class="toolbar-btn" id="btn-save" title="Guardar (Ctrl+S)">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"
+              />
+              <polyline points="17 21 17 13 7 13 7 21" />
+              <polyline points="7 3 7 8 15 8" />
+            </svg>
+            Guardar
+          </button>
+          <button class="toolbar-btn" id="btn-export" title="Exportar como JSON">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
+              />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Exportar
+          </button>
+          <button class="toolbar-btn" id="btn-import" title="Importar JSON">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
+              />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Importar
+          </button>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+          <button class="toolbar-btn ai-btn" id="btn-ai-settings" title="Configuración de IA">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/>
+              <circle cx="12" cy="15" r="2"/>
+            </svg>
+            IA Config
+          </button>
+          <button class="toolbar-btn ai-btn" id="btn-ai-translate-all" title="Traducir todos los nodos">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="2" y1="12" x2="22" y2="12"/>
+              <path d="M12 2a15 15 0 0 1 4 10 15 15 0 0 1-4 10 15 15 0 0 1-4-10A15 15 0 0 1 12 2z"/>
+            </svg>
+            Traducir
+          </button>
+          <button class="toolbar-btn ai-btn" id="btn-ai-generate" title="Generar diálogo con IA">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+            Generar
+          </button>
+        </div>
+
+        <div class="toolbar-spacer"></div>
+
+        <!-- LANGUAGE TOGGLE -->
+        <div class="lang-toggle" id="lang-toggle" title="Cambiar idioma de edición">
+          <div class="lang-slider"></div>
+          <span class="lang-label lang-es active">ES</span>
+          <span class="lang-label lang-en">EN</span>
+        </div>
+
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-status">
+          <span class="dot"></span>
+          <span id="status-text">Sin cambios</span>
+        </div>
+      </header>
+
+      <!-- SIDEBAR -->
+      <aside id="sidebar">
+        <div class="sidebar-section">
+          <div class="section-header">
+            <span class="section-title">NPCs</span>
+            <button
+              class="section-add-btn"
+              id="btn-add-npc"
+              title="Agregar NPC"
+            >
+              +
+            </button>
+          </div>
+          <ul class="section-list" id="npc-list"></ul>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-header">
+            <span class="section-title">Quests</span>
+            <button
+              class="section-add-btn"
+              id="btn-add-quest"
+              title="Agregar Quest"
+            >
+              +
+            </button>
+          </div>
+          <ul class="section-list" id="quest-list"></ul>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-header">
+            <span class="section-title">Diálogos</span>
+            <button
+              class="section-add-btn"
+              id="btn-add-dialogue"
+              title="Agregar Diálogo"
+            >
+              +
+            </button>
+          </div>
+          <ul class="section-list" id="dialogue-list"></ul>
+        </div>
+      </aside>
+
+      <!-- CANVAS -->
+      <main id="canvas-container">
+        <div class="grid-bg" id="grid-bg"></div>
+        <svg id="canvas-svg">
+          <g id="connections-group"></g>
+        </svg>
+        <div id="nodes-layer"></div>
+        <div id="selection-rect"></div>
+
+        <div class="canvas-empty-state" id="canvas-empty">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <path
+              d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+            />
+          </svg>
+          <h3>Sin diálogo seleccionado</h3>
+          <p>Selecciona o crea un diálogo en la barra lateral</p>
+        </div>
+
+        <div class="canvas-controls" id="canvas-controls" style="display: none">
+          <button class="canvas-ctrl-btn" id="btn-zoom-out" title="Alejar">
+            −
+          </button>
+          <span class="zoom-label" id="zoom-label">100%</span>
+          <button class="canvas-ctrl-btn" id="btn-zoom-in" title="Acercar">
+            +
+          </button>
+          <button
+            class="canvas-ctrl-btn"
+            id="btn-zoom-reset"
+            title="Restablecer"
+          >
+            ⊙
+          </button>
+          <button class="canvas-ctrl-btn" id="btn-fit" title="Ajustar vista">
+            ⊞
+          </button>
+          <span class="canvas-ctrl-divider"></span>
+          <button class="canvas-ctrl-btn" id="btn-snap" title="Snap-to-Grid">
+            ⬥
+          </button>
+          <span class="canvas-ctrl-divider"></span>
+          <button class="canvas-ctrl-btn" id="btn-auto-layout" title="Ordenar nodos automáticamente">
+            ⊾
+          </button>
+        </div>
+
+        <button
+          class="canvas-add-btn"
+          id="btn-add-node"
+          style="display: none"
+          title="Agregar nodo"
+        >
+          +
+        </button>
+      </main>
+
+      <!-- INSPECTOR -->
+      <aside id="inspector">
+        <div class="inspector-empty" id="inspector-empty">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+            />
+          </svg>
+          <h4>Inspector</h4>
+          <p>Selecciona un elemento para ver y editar sus propiedades</p>
+        </div>
+        <div id="inspector-content" style="display: none"></div>
+      </aside>
+    </div>
+
+    <!-- CONTEXT MENU -->
+    <div class="context-menu" id="context-menu"></div>
+
+    <!-- MODAL -->
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" id="modal"></div>
+    </div>
+
+    <!-- TOASTS -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- FILE IMPORT -->
+    <input type="file" id="file-import" accept=".json" />
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

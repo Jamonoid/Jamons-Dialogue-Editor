@@ -1,0 +1,47 @@
+{
+  "name": "dialogue-forge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build",
+    "dist": "vite build && electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.dialogueforge.app",
+    "productName": "Dialogue Forge",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "electron/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Dialogue Forge"
+    },
+    "publish": null
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "electron": "^36.3.1",
+    "electron-builder": "^25.1.8",
+    "vite": "^8.0.12",
+    "wait-on": "^8.0.3"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^6.0.227"
+  }
+}
