@@ -3,7 +3,7 @@
 App vibecodeada para hacer los dialogos de mi jueguito. 
 El nombre de la app la eligió la IA al peo.
 
-## Caracteristicas principales
+## Caracteristicas
 
 * Lienzo visual interactivo para creacion y conexion de nodos de dialogo.
 * Gestion de personajes, variables del sistema y condiciones de flujo.
@@ -16,13 +16,13 @@ El nombre de la app la eligió la IA al peo.
 
 - Node.js.
 
-## Instrucciones de instalacion
+## Instalacion
 
 ```bash
 npm install
 ```
 
-## Comandos de ejecucion
+## Comandos
 
 * **Desarrollo local:** Ejecuta el servidor de Vite y abre la aplicacion de escritorio en modo de desarrollo.
   ```bash
