@@ -19,6 +19,10 @@ let panStart = { x: 0, y: 0 };
 let snapEnabled = localStorage.getItem('dialogueForge_snap') === 'true';
 const GRID_SIZE = 24;
 
+// Q10: Camera positions per dialogue
+let cameraCache = {};
+let lastDialogueId = null;
+
 export function isSnapEnabled() { return snapEnabled; }
 export function toggleSnap() {
   snapEnabled = !snapEnabled;
@@ -72,6 +76,21 @@ export function render() {
   emptyState.style.display = 'none';
   controls.style.display = '';
   addBtn.style.display = '';
+
+  // Q10: Restore camera when switching dialogues
+  const currentDlgId = dlg.id;
+  if (currentDlgId !== lastDialogueId) {
+    if (cameraCache[currentDlgId]) {
+      offset.x = cameraCache[currentDlgId].x;
+      offset.y = cameraCache[currentDlgId].y;
+      zoom = cameraCache[currentDlgId].zoom;
+    } else {
+      offset.x = 0;
+      offset.y = 0;
+      zoom = 1;
+    }
+    lastDialogueId = currentDlgId;
+  }
 
   renderNodes(dlg, nodesLayer);
   applyTransform();
@@ -138,10 +157,27 @@ export function renderConnections() {
 
   connectionsGroup.innerHTML = paths;
 
-  // Right-click on connections
+  // Right-click and hover on connections
   connectionsGroup.querySelectorAll('.conn-hitarea').forEach((path) => {
     path.style.pointerEvents = 'stroke';
     path.style.cursor = 'pointer';
+
+    // Q3: Highlight source and target nodes on hover
+    path.addEventListener('mouseenter', () => {
+      const sourceId = path.dataset.source;
+      const targetId = path.dataset.target;
+      const sourceEl = document.querySelector(`.dialogue-node[data-node-id="${sourceId}"]`);
+      const targetEl = document.querySelector(`.dialogue-node[data-node-id="${targetId}"]`);
+      if (sourceEl) sourceEl.classList.add('conn-highlighted');
+      if (targetEl) targetEl.classList.add('conn-highlighted');
+      // Also highlight the visible path
+      const visiblePath = connectionsGroup.querySelector(`.conn-visible[data-source="${sourceId}"][data-target="${targetId}"]`);
+      if (visiblePath) { visiblePath.setAttribute('stroke-width', '3'); visiblePath.setAttribute('opacity', '1'); }
+    });
+    path.addEventListener('mouseleave', () => {
+      document.querySelectorAll('.dialogue-node.conn-highlighted').forEach((el) => el.classList.remove('conn-highlighted'));
+      connectionsGroup.querySelectorAll('.conn-visible').forEach((p) => { p.setAttribute('stroke-width', '2'); p.setAttribute('opacity', '0.6'); });
+    });
 
     path.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -174,6 +210,12 @@ export function applyTransform() {
 
   const label = $('#zoom-label');
   if (label) label.textContent = Math.round(zoom * 100) + '%';
+
+  // Q10: Save camera position for current dialogue
+  const dlgId = State.getActiveDialogueId();
+  if (dlgId) {
+    cameraCache[dlgId] = { x: offset.x, y: offset.y, zoom };
+  }
 }
 
 // ─── SETUP ───────────────────────────────────────────

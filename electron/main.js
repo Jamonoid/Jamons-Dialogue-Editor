@@ -37,6 +37,32 @@ function createWindow() {
     win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 
+  // C1: Confirm close with unsaved changes
+  win.on('close', async (e) => {
+    const isDirty = await win.webContents.executeJavaScript(
+      'typeof window.__dialogueForgeDirty === "function" ? window.__dialogueForgeDirty() : false'
+    ).catch(() => false);
+    if (isDirty) {
+      e.preventDefault();
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'warning',
+        buttons: ['Guardar y salir', 'Salir sin guardar', 'Cancelar'],
+        defaultId: 0,
+        cancelId: 2,
+        title: 'Cambios sin guardar',
+        message: 'Tienes cambios sin guardar. ¿Qué deseas hacer?',
+      });
+      if (response === 0) {
+        // Save then close
+        await win.webContents.executeJavaScript('window.__dialogueForgeSave && window.__dialogueForgeSave()');
+        win.destroy();
+      } else if (response === 1) {
+        win.destroy();
+      }
+      // response 2 = cancel, do nothing
+    }
+  });
+
   return win;
 }
 

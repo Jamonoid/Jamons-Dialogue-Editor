@@ -1,9 +1,9 @@
 /**
  * Sidebar — renders NPC, Quest, and Dialogue lists in the left panel.
  */
-import { $, $$ } from '../utils/helpers.js';
+import { $, $$, esc } from '../utils/helpers.js';
 import * as State from './state.js';
-import { showModal, showContextMenu, toast } from './ui.js';
+import { showModal, showContextMenu, toast, confirmDelete } from './ui.js';
 
 let onSelectCallback = null;
 
@@ -32,7 +32,7 @@ function renderNPCs() {
       (n) => `
     <li class="section-list-item" data-type="npc" data-id="${n.id}">
       <span class="item-icon npc-icon">N</span>
-      <span class="item-name">${n.name}</span>
+      <span class="item-name">${esc(n.name)}</span>
       <button class="item-delete" data-delete="npc" data-id="${n.id}" title="Eliminar">×</button>
     </li>
   `
@@ -56,7 +56,7 @@ function renderQuests() {
       (q) => `
     <li class="section-list-item" data-type="quest" data-id="${q.id}">
       <span class="item-icon quest-icon">Q</span>
-      <span class="item-name">${q.name}</span>
+      <span class="item-name">${esc(q.name)}</span>
       <button class="item-delete" data-delete="quest" data-id="${q.id}" title="Eliminar">×</button>
     </li>
   `
@@ -82,7 +82,7 @@ function renderDialogues() {
       return `
       <li class="section-list-item ${activeId === d.id ? 'active' : ''}" data-type="dialogue" data-id="${d.id}">
         <span class="item-icon dialogue-icon">D</span>
-        <span class="item-name">${d.title}${npc ? ` <span style="color:var(--text-muted);font-size:11px">· ${npc.name}</span>` : ''}</span>
+        <span class="item-name">${esc(d.title)}${npc ? ` <span style="color:var(--text-muted);font-size:11px">· ${esc(npc.name)}</span>` : ''}</span>
         <button class="item-delete" data-delete="dialogue" data-id="${d.id}" title="Eliminar">×</button>
       </li>
     `;
@@ -108,45 +108,54 @@ function attachListEvents(list, type) {
       if (e.target.classList.contains('item-delete')) return;
       if (type === 'npc') editNPC(id);
       else if (type === 'quest') editQuest(id);
+      else if (type === 'dialogue') editDialogue(id);
     });
 
     item.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       const menuItems = [];
-      if (type !== 'dialogue') {
-        menuItems.push({
-          label: 'Editar',
-          action: 'edit',
-          handler: () => {
-            if (type === 'npc') editNPC(id);
-            else if (type === 'quest') editQuest(id);
-          },
-        });
-      }
+      menuItems.push({
+        label: 'Editar',
+        action: 'edit',
+        handler: () => {
+          if (type === 'npc') editNPC(id);
+          else if (type === 'quest') editQuest(id);
+          else if (type === 'dialogue') editDialogue(id);
+        },
+      });
       menuItems.push({ divider: true });
       menuItems.push({
         label: 'Eliminar',
         action: 'delete',
         danger: true,
         handler: () => {
-          if (type === 'npc') State.deleteNPC(id);
-          else if (type === 'quest') State.deleteQuest(id);
-          else if (type === 'dialogue') State.deleteDialogue(id);
+          const name = type === 'npc' ? State.getNPC(id)?.name
+            : type === 'quest' ? State.getState().quests.find(q => q.id === id)?.name
+            : State.getState().dialogues.find(d => d.id === id)?.title;
+          confirmDelete(`¿Eliminar ${type === 'npc' ? 'NPC' : type === 'quest' ? 'Quest' : 'Diálogo'} "${name || ''}"? Esta acción no se puede deshacer fácilmente.`, () => {
+            if (type === 'npc') State.deleteNPC(id);
+            else if (type === 'quest') State.deleteQuest(id);
+            else if (type === 'dialogue') State.deleteDialogue(id);
+          });
         },
       });
       showContextMenu(e.clientX, e.clientY, menuItems);
     });
   });
 
-  // Delete buttons
   $$('.item-delete', list).forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const deleteType = btn.dataset.delete;
       const deleteId = btn.dataset.id;
-      if (deleteType === 'npc') State.deleteNPC(deleteId);
-      else if (deleteType === 'quest') State.deleteQuest(deleteId);
-      else if (deleteType === 'dialogue') State.deleteDialogue(deleteId);
+      const name = deleteType === 'npc' ? State.getNPC(deleteId)?.name
+        : deleteType === 'quest' ? State.getState().quests.find(q => q.id === deleteId)?.name
+        : State.getState().dialogues.find(d => d.id === deleteId)?.title;
+      confirmDelete(`¿Eliminar ${deleteType === 'npc' ? 'NPC' : deleteType === 'quest' ? 'Quest' : 'Diálogo'} "${name || ''}"?`, () => {
+        if (deleteType === 'npc') State.deleteNPC(deleteId);
+        else if (deleteType === 'quest') State.deleteQuest(deleteId);
+        else if (deleteType === 'dialogue') State.deleteDialogue(deleteId);
+      });
     });
   });
 }
@@ -179,8 +188,24 @@ function editQuest(id) {
   );
 }
 
+function editDialogue(id) {
+  const dlg = State.getState().dialogues.find((d) => d.id === id);
+  if (!dlg) return;
+  showModal(
+    'Editar Diálogo',
+    [{ key: 'title', label: 'Título', value: dlg.title }],
+    (vals) => {
+      if (!vals.title) return;
+      State.updateDialogue(id, { title: vals.title });
+    }
+  );
+}
+
 // ─── ADD BUTTONS ─────────────────────────────────────
 export function setupAddButtons() {
+  // Q9: Collapsible sidebar sections
+  setupCollapsibleSections();
+
   $('#btn-add-npc').addEventListener('click', () => {
     showModal(
       'Nuevo NPC',
@@ -246,5 +271,33 @@ export function setupAddButtons() {
         State.addDialogue(vals.title, vals.npcId, vals.questId);
       }
     );
+  });
+}
+
+// ─── COLLAPSIBLE SECTIONS (Q9) ───────────────────────
+function setupCollapsibleSections() {
+  const STORAGE_KEY = 'df_collapsed_sections';
+  const collapsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+
+  // Apply initial state
+  Object.entries(collapsed).forEach(([section, isCollapsed]) => {
+    if (isCollapsed) {
+      const sectionEl = document.querySelector(`.sidebar-section[data-section="${section}"]`);
+      if (sectionEl) sectionEl.classList.add('collapsed');
+    }
+  });
+
+  // Click handlers
+  $$('[data-collapse]').forEach((header) => {
+    header.addEventListener('click', (e) => {
+      // Don't collapse when clicking the add button
+      if (e.target.closest('.section-add-btn')) return;
+      const section = header.dataset.collapse;
+      const sectionEl = header.closest('.sidebar-section');
+      if (!sectionEl) return;
+      sectionEl.classList.toggle('collapsed');
+      collapsed[section] = sectionEl.classList.contains('collapsed');
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(collapsed));
+    });
   });
 }

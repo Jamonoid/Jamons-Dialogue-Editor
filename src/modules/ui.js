@@ -17,6 +17,42 @@ export function toast(msg, type = 'info') {
   }, 2800);
 }
 
+// ─── CONFIRM DELETE ──────────────────────────────────
+/**
+ * Show a confirmation modal before a destructive action.
+ * @param {string} message - What is being deleted (shown to user).
+ * @param {Function} onConfirm - Called if user confirms.
+ */
+export function confirmDelete(message, onConfirm) {
+  const overlay = $('#modal-overlay');
+  const modal = $('#modal');
+
+  modal.innerHTML = `
+    <div class="modal-header"><h3>Confirmar eliminación</h3></div>
+    <div class="modal-body">
+      <p style="color: var(--text-secondary); font-size: 14px;">${message}</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="modal-cancel">Cancelar</button>
+      <button class="btn btn-danger" id="modal-confirm">Eliminar</button>
+    </div>
+  `;
+
+  overlay.classList.add('active');
+
+  const close = () => overlay.classList.remove('active');
+  $('#modal-cancel').onclick = close;
+  overlay.onmousedown = (e) => { if (e.target === overlay) close(); };
+  $('#modal-confirm').onclick = () => {
+    close();
+    onConfirm();
+  };
+  modal.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); $('#modal-confirm').click(); }
+    if (e.key === 'Escape') close();
+  };
+}
+
 // ─── MODAL ───────────────────────────────────────────
 export function showModal(title, fields, onConfirm) {
   const overlay = $('#modal-overlay');

@@ -41,7 +41,7 @@
         <div class="toolbar-divider"></div>
 
         <div class="toolbar-group">
-          <button class="toolbar-btn" id="btn-file-open" title="Abrir archivo">
+          <button class="toolbar-btn" id="btn-file-open" title="Abrir archivo (Ctrl+O)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
@@ -104,7 +104,7 @@
             </svg>
             IA Config
           </button>
-          <button class="toolbar-btn ai-btn" id="btn-ai-translate-all" title="Traducir todos los nodos">
+          <button class="toolbar-btn ai-btn" id="btn-ai-translate-all" title="Traducir nodos del diálogo activo (ES → EN)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10"/>
               <line x1="2" y1="12" x2="22" y2="12"/>
@@ -139,8 +139,9 @@
 
       <!-- SIDEBAR -->
       <aside id="sidebar">
-        <div class="sidebar-section">
-          <div class="section-header">
+        <div class="sidebar-section" data-section="npcs">
+          <div class="section-header" data-collapse="npcs">
+            <span class="section-collapse-icon">▾</span>
             <span class="section-title">NPCs</span>
             <button
               class="section-add-btn"
@@ -153,8 +154,9 @@
           <ul class="section-list" id="npc-list"></ul>
         </div>
 
-        <div class="sidebar-section">
-          <div class="section-header">
+        <div class="sidebar-section" data-section="quests">
+          <div class="section-header" data-collapse="quests">
+            <span class="section-collapse-icon">▾</span>
             <span class="section-title">Quests</span>
             <button
               class="section-add-btn"
@@ -167,8 +169,9 @@
           <ul class="section-list" id="quest-list"></ul>
         </div>
 
-        <div class="sidebar-section">
-          <div class="section-header">
+        <div class="sidebar-section" data-section="dialogues">
+          <div class="section-header" data-collapse="dialogues">
+            <span class="section-collapse-icon">▾</span>
             <span class="section-title">Diálogos</span>
             <button
               class="section-add-btn"
@@ -238,7 +241,7 @@
           class="canvas-add-btn"
           id="btn-add-node"
           style="display: none"
-          title="Agregar nodo"
+          title="Agregar nodo (+)"
         >
           +
         </button>

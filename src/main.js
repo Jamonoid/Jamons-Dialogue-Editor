@@ -18,6 +18,13 @@ function renderAll() {
   Sidebar.render();
   Canvas.render();
   Inspector.render();
+
+  // Disable AI toolbar buttons when no dialogue is active
+  const hasDlg = !!State.getActiveDialogue();
+  const translateBtn = $('#btn-ai-translate-all');
+  const generateBtn = $('#btn-ai-generate');
+  if (translateBtn) { translateBtn.disabled = !hasDlg; translateBtn.style.opacity = hasDlg ? '' : '0.4'; }
+  if (generateBtn) { generateBtn.disabled = !hasDlg; generateBtn.style.opacity = hasDlg ? '' : '0.4'; }
 }
 
 // ─── WIRE MODULES ────────────────────────────────────
@@ -129,14 +136,14 @@ function setupKeyboard() {
       }
     }
 
-    // Ctrl+Z → undo
-    if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+    // Ctrl+Z → undo (only when not editing text, so browser native undo works)
+    if (e.ctrlKey && e.key === 'z' && !e.shiftKey && !isInput) {
       e.preventDefault();
       State.undo();
     }
 
-    // Ctrl+Y or Ctrl+Shift+Z → redo
-    if ((e.ctrlKey && e.key === 'y') || (e.ctrlKey && e.shiftKey && e.key === 'Z')) {
+    // Ctrl+Y or Ctrl+Shift+Z → redo (only when not editing text)
+    if (((e.ctrlKey && e.key === 'y') || (e.ctrlKey && e.shiftKey && e.key === 'Z')) && !isInput) {
       e.preventDefault();
       State.redo();
     }
@@ -204,6 +211,9 @@ function init() {
   initLangToggle();
   setupKeyboard();
   renderAll();
+
+  // C1: Expose save for Electron close confirmation
+  window.__dialogueForgeSave = () => State.saveToFile();
 }
 
 init();

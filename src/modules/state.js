@@ -43,6 +43,10 @@ let isBatching = false;
 // Callback for when state changes — set by main.js
 let onChangeCallback = null;
 
+// C1: Expose dirty state and save for Electron close confirmation
+export function isDirty() { return dirty; }
+window.__dialogueForgeDirty = () => dirty;
+
 export function onChange(cb) {
   onChangeCallback = cb;
 }
@@ -157,6 +161,8 @@ export function clearSelection() {
 export function setActiveDialogueId(id) {
   activeDialogueId = id;
   selectedNodeIds.clear();
+  // Q16: Persist active dialogue for session restoration
+  try { localStorage.setItem('df_activeDialogueId', id || ''); } catch (e) {}
 }
 
 // ─── NPC CRUD ────────────────────────────────────────
@@ -182,6 +188,18 @@ export function updateNPC(id, name) {
     dirty = true;
     updateStatus();
     // Don't call emitChange to avoid re-render during typing
+  }
+}
+
+export function updateNPCColor(id, color) {
+  const npc = state.npcs.find((n) => n.id === id);
+  if (npc) {
+    npc.color = color;
+    dirty = true;
+    updateStatus();
+    // Don't call emitChange() here — that would re-render the inspector
+    // and close the native color picker popup mid-drag.
+    // The caller is responsible for calling notifyChange() on picker close.
   }
 }
 
@@ -476,6 +494,25 @@ export function removeConnection(sourceNodeId, targetNodeId) {
   emitChange();
 }
 
+export function reorderConnection(sourceNodeId, targetNodeId, direction) {
+  const dlg = getActiveDialogue();
+  if (!dlg) return;
+  const source = dlg.nodes.find((n) => n.id === sourceNodeId);
+  if (!source) return;
+
+  source.connections = source.connections.map(normalizeConnection);
+  const idx = source.connections.findIndex((c) => c.targetId === targetNodeId);
+  if (idx < 0) return;
+
+  const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (newIdx < 0 || newIdx >= source.connections.length) return;
+
+  pushUndo();
+  const [item] = source.connections.splice(idx, 1);
+  source.connections.splice(newIdx, 0, item);
+  emitChange();
+}
+
 export function updateConnectionLabel(sourceNodeId, targetNodeId, label) {
   const dlg = getActiveDialogue();
   if (!dlg) return;
@@ -538,6 +575,12 @@ export function load() {
     } catch {
       state = { npcs: [], quests: [], dialogues: [] };
     }
+  }
+
+  // Q16: Restore active dialogue from previous session
+  const savedDlgId = localStorage.getItem('df_activeDialogueId');
+  if (savedDlgId && state.dialogues.some((d) => d.id === savedDlgId)) {
+    activeDialogueId = savedDlgId;
   }
 }
 

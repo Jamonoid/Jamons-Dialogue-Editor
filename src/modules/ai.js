@@ -69,8 +69,31 @@ async function callOpenRouter(messages, options = {}) {
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    const msg = err?.error?.message || `Error ${response.status}`;
-    throw new Error(msg);
+    const apiMsg = err?.error?.message || '';
+    let userMsg;
+    switch (response.status) {
+      case 401:
+        userMsg = 'API Key inválida o expirada. Revisa la configuración de IA.';
+        break;
+      case 402:
+        userMsg = 'Sin crédito en OpenRouter. Recarga tu cuenta.';
+        break;
+      case 403:
+        userMsg = 'Acceso denegado. Verifica los permisos de tu API Key.';
+        break;
+      case 404:
+        userMsg = `Modelo "${config.model}" no encontrado. Verifica el ID del modelo.`;
+        break;
+      case 429:
+        userMsg = 'Demasiadas solicitudes. Espera un momento e intenta de nuevo.';
+        break;
+      case 503:
+        userMsg = 'Servicio temporalmente no disponible. Intenta más tarde.';
+        break;
+      default:
+        userMsg = apiMsg || `Error del servidor (${response.status})`;
+    }
+    throw new Error(userMsg);
   }
 
   const data = await response.json();

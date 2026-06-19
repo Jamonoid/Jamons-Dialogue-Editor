@@ -3,7 +3,7 @@
  * Simplified model: nodes connect directly to other nodes (no inline options).
  * Flow is TOP-TO-BOTTOM: input connector at top, output connector at bottom.
  */
-import { $, $$ } from '../utils/helpers.js';
+import { $, $$, esc } from '../utils/helpers.js';
 import { t, tPlaceholder, getLang, setText } from './lang.js';
 import { showContextMenu, toast } from './ui.js';
 import * as State from './state.js';
@@ -69,7 +69,7 @@ export function renderNodes(dlg, container) {
         ${isStart ? '<div class="node-start-indicator" title="Nodo inicial">▶</div>' : ''}
         <div class="node-input-connector" data-input-node="${node.id}" title="Soltar conexión aquí" ${npcColor ? `style="border-color: ${npcColor}"` : ''}></div>
         <div class="node-header" ${npcColor ? `style="background: ${hexToRgba(npcColor, 0.1)}; border-bottom-color: ${hexToRgba(npcColor, 0.2)};"` : ''}>
-          <span class="node-type-badge" ${npcColor ? `style="background: ${hexToRgba(npcColor, 0.15)}; color: ${npcColor};"` : ''}>${isStart ? 'INICIO' : (npcName || 'NODO')}</span>
+          <span class="node-type-badge" ${npcColor ? `style="background: ${hexToRgba(npcColor, 0.15)}; color: ${npcColor};"` : ''}>${isStart ? 'INICIO' : (npcName ? esc(npcName) : 'NODO')}</span>
           <div class="node-metadata-badges">
             ${node.condition ? `<span class="meta-badge condition" title="Condición: ${node.condition}">IF</span>` : ''}
             ${node.action ? `<span class="meta-badge action" title="Acción: ${node.action}">DO</span>` : ''}
@@ -164,7 +164,7 @@ export function setupNodeInteractions(dlg, callbacks) {
 
       showContextMenu(e.clientX, e.clientY, [
         {
-          label: 'Duplicar nodo',
+          label: 'Duplicar nodo (Ctrl+D)',
           action: 'duplicate',
           handler: () => {
             const dup = State.duplicateNode(nodeId);
@@ -184,7 +184,7 @@ export function setupNodeInteractions(dlg, callbacks) {
         },
         { divider: true },
         {
-          label: 'Eliminar nodo',
+          label: 'Eliminar nodo (Delete)',
           action: 'delete',
           danger: true,
           handler: () => State.deleteNode(nodeId),
@@ -205,6 +205,13 @@ export function setupNodeInteractions(dlg, callbacks) {
       tempLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       tempLine.classList.add('temp-connection');
       svg.appendChild(tempLine);
+
+      // Q13: Highlight valid drop targets
+      $$(`.node-input-connector`).forEach((ic) => {
+        if (ic.dataset.inputNode !== drawFromNodeId) {
+          ic.classList.add('connect-target-highlight');
+        }
+      });
     });
   });
 
@@ -428,4 +435,8 @@ function endDraw() {
     tempLine.remove();
     tempLine = null;
   }
+  // Q13: Remove highlight from all input connectors
+  document.querySelectorAll('.node-input-connector.connect-target-highlight').forEach((ic) => {
+    ic.classList.remove('connect-target-highlight');
+  });
 }

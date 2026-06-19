@@ -2,7 +2,7 @@
  * Inspector — right panel showing properties of the selected element.
  * Simplified: no more inline options, shows direct connections.
  */
-import { $, $$ } from '../utils/helpers.js';
+import { $, $$, esc } from '../utils/helpers.js';
 import * as State from './state.js';
 import { t, getLang, setText } from './lang.js';
 import { toast, showAILoading, hideAILoading, showAIGenerateModal } from './ui.js';
@@ -96,13 +96,20 @@ function renderNPC(id) {
   const el = $('#inspector-content');
   el.innerHTML = `
     <div class="inspector-header">
-      <div class="type-indicator npc-type">N</div>
-      <h3>${npc.name}</h3>
+      <div class="type-indicator npc-type" ${npc.color ? `style="background: ${npc.color}20; color: ${npc.color}; border-color: ${npc.color}40;"` : ''}>N</div>
+      <h3>${esc(npc.name)}</h3>
     </div>
     <div class="inspector-body">
       <div class="field-group">
         <label class="field-label">Nombre</label>
-        <input class="field-input" id="insp-npc-name" value="${npc.name}">
+        <input class="field-input" id="insp-npc-name" value="${esc(npc.name)}">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Color</label>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <input type="color" id="insp-npc-color" value="${npc.color || '#6c5ce7'}" style="width:40px;height:32px;border:none;background:none;cursor:pointer;padding:0;">
+          <span style="font-size:12px;color:var(--text-muted)" id="insp-npc-color-hex">${npc.color || '#6c5ce7'}</span>
+        </div>
       </div>
       <div class="field-group">
         <label class="field-label">ID</label>
@@ -123,6 +130,19 @@ function renderNPC(id) {
   $('#insp-npc-name').addEventListener('blur', () => {
     State.notifyChange();
   });
+  $('#insp-npc-color').addEventListener('focus', () => {
+    State.pushUndoCheckpoint();
+  });
+  $('#insp-npc-color').addEventListener('input', (e) => {
+    // Update silently (no re-render) so the native color picker stays open
+    State.updateNPCColor(id, e.target.value);
+    const hexLabel = $('#insp-npc-color-hex');
+    if (hexLabel) hexLabel.textContent = e.target.value;
+  });
+  $('#insp-npc-color').addEventListener('change', () => {
+    // Fires when the color picker closes — trigger full re-render now
+    State.notifyChange();
+  });
   $('#insp-npc-delete').addEventListener('click', () => {
     State.deleteNPC(id);
     clear();
@@ -139,12 +159,12 @@ function renderQuest(id) {
   el.innerHTML = `
     <div class="inspector-header">
       <div class="type-indicator quest-type">Q</div>
-      <h3>${quest.name}</h3>
+      <h3>${esc(quest.name)}</h3>
     </div>
     <div class="inspector-body">
       <div class="field-group">
         <label class="field-label">Nombre</label>
-        <input class="field-input" id="insp-quest-name" value="${quest.name}">
+        <input class="field-input" id="insp-quest-name" value="${esc(quest.name)}">
       </div>
       <div class="field-group">
         <label class="field-label">ID</label>
@@ -181,12 +201,12 @@ function renderDialogue(id) {
   el.innerHTML = `
     <div class="inspector-header">
       <div class="type-indicator dialogue-type">D</div>
-      <h3>${dlg.title}</h3>
+      <h3>${esc(dlg.title)}</h3>
     </div>
     <div class="inspector-body">
       <div class="field-group">
         <label class="field-label">Título</label>
-        <input class="field-input" id="insp-dlg-title" value="${dlg.title}">
+        <input class="field-input" id="insp-dlg-title" value="${esc(dlg.title)}">
       </div>
       <div class="field-group">
         <label class="field-label">NPC</label>
@@ -300,12 +320,15 @@ function renderNode(nodeId) {
 
   // Find connections FROM this node
   const outgoing = (node.connections || [])
-    .map((cid) => dlg.nodes.find((n) => n.id === cid))
+    .map((c) => {
+      const { targetId } = State.normalizeConnection(c);
+      return dlg.nodes.find((n) => n.id === targetId);
+    })
     .filter(Boolean);
 
   // Find connections TO this node
   const incoming = dlg.nodes.filter((n) =>
-    n.connections && n.connections.includes(nodeId)
+    n.connections && n.connections.some((c) => State.normalizeConnection(c).targetId === nodeId)
   );
 
   el.innerHTML = `
@@ -344,12 +367,15 @@ function renderNode(nodeId) {
           <h4>Conexiones salientes (${outgoing.length})</h4>
         </div>
         <div id="insp-connections-list">
-          ${outgoing.map((targetNode) => {
+          ${outgoing.map((targetNode, idx) => {
             const targetText = t(targetNode.text);
             return `
-              <div class="connection-card">
+              <div class="connection-card" data-nav-node="${targetNode.id}" style="cursor:pointer" title="Clic para ir al nodo">
                 <span class="conn-preview">#${targetNode.id.slice(-5)} ${targetText ? '— ' + targetText.slice(0, 25) : '(sin texto)'}</span>
-                <button class="conn-delete" data-conn-target="${targetNode.id}" title="Eliminar conexión">×</button>
+                <div class="conn-actions">
+                  ${outgoing.length > 1 ? `<button class="conn-reorder" data-conn-target="${targetNode.id}" data-dir="up" title="Subir" ${idx === 0 ? 'disabled' : ''}>▲</button><button class="conn-reorder" data-conn-target="${targetNode.id}" data-dir="down" title="Bajar" ${idx === outgoing.length - 1 ? 'disabled' : ''}>▼</button>` : ''}
+                  <button class="conn-delete" data-conn-target="${targetNode.id}" title="Eliminar conexión">×</button>
+                </div>
               </div>
             `;
           }).join('')}
@@ -364,7 +390,7 @@ function renderNode(nodeId) {
         </div>
         ${incoming.map((src) => {
           const srcText = t(src.text);
-          return `<div class="connection-card incoming-card">
+          return `<div class="connection-card incoming-card" data-nav-node="${src.id}" style="cursor:pointer" title="Clic para ir al nodo">
             <span class="conn-preview">#${src.id.slice(-5)} ${srcText ? '— ' + srcText.slice(0, 25) : '(sin texto)'}</span>
           </div>`;
         }).join('')}
@@ -427,8 +453,27 @@ function renderNode(nodeId) {
 
   // Remove connection buttons
   $$('.conn-delete').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       State.removeConnection(nodeId, btn.dataset.connTarget);
+    });
+  });
+
+  // Q5: Reorder connection buttons
+  $$('.conn-reorder').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      State.reorderConnection(nodeId, btn.dataset.connTarget, btn.dataset.dir);
+    });
+  });
+
+  // Q4: Navigate to node on connection card click
+  $$('.connection-card[data-nav-node]').forEach((card) => {
+    card.addEventListener('click', (e) => {
+      if (e.target.classList.contains('conn-delete') || e.target.classList.contains('conn-reorder')) return;
+      const targetId = card.dataset.navNode;
+      State.setSelectedNodeId(targetId);
+      show('node', targetId);
     });
   });
 

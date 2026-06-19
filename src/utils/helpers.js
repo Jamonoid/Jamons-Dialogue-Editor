@@ -1,6 +1,7 @@
-/** Generate a short unique ID */
+/** Generate a short unique ID (counter prevents collisions during batch creation) */
+let _uidCounter = 0;
 export const uid = () =>
-  Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  Date.now().toString(36) + ((_uidCounter++) % 1000).toString(36) + Math.random().toString(36).slice(2, 9);
 
 /** querySelector shortcut */
 export const $ = (sel, root = document) => root.querySelector(sel);
