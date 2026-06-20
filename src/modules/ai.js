@@ -22,7 +22,9 @@ const CONFIG_KEY = 'dialogueForge_ai_config';
 
 let config = {
   apiKey: '',
-  model: '',
+  modelGenerate: '',   // For dialogue generation & extension
+  modelTranslate: '',  // For ES → EN translation
+  modelChat: '',       // For the integrated chat assistant
   temperature: 0.7,
   isThinking: false,
   contextFiles: [],  // [{name, text}]
@@ -38,7 +40,18 @@ export function saveConfig(newConfig) {
 export function loadConfig() {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
-    if (raw) config = { ...config, ...JSON.parse(raw) };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      config = { ...config, ...parsed };
+      // Migrate from single "model" field to per-task models
+      if (parsed.model && !parsed.modelGenerate) {
+        config.modelGenerate = parsed.model;
+        config.modelTranslate = parsed.model;
+        config.modelChat = parsed.model;
+        delete config.model;
+        localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+      }
+    }
   } catch { /* ignore */ }
 }
 
@@ -48,8 +61,13 @@ async function callOpenRouter(messages, options = {}) {
     throw new Error('API Key no configurada. Abre la configuración de IA.');
   }
 
+  const model = options.model || config.modelGenerate;
+  if (!model) {
+    throw new Error('Modelo no configurado. Abre la configuración de IA.');
+  }
+
   const body = {
-    model: config.model,
+    model,
     messages,
     temperature: options.temperature ?? config.temperature,
   };
@@ -129,7 +147,7 @@ export async function translateNode(nodeId) {
     { role: 'user', content: sourceText }
   ];
 
-  const translated = await callOpenRouter(messages);
+  const translated = await callOpenRouter(messages, { model: config.modelTranslate });
   const updatedText = { ...node.text };
   updatedText.en = translated;
   State.updateNodeText(nodeId, updatedText);
@@ -157,7 +175,7 @@ export async function translateAllNodes() {
     { role: 'user', content: texts }
   ];
 
-  const result = await callOpenRouter(messages, { maxTokens: 4096 });
+  const result = await callOpenRouter(messages, { model: config.modelTranslate, maxTokens: 4096 });
 
   // Parse results
   const parts = result.split('---').map((p) => p.trim());
@@ -234,7 +252,7 @@ export async function generateDialogue(prompt, npcName, { minNodes = 5, maxNodes
   ];
 
   const dynamicMaxTokens = Math.min(16384, Math.max(4096, maxNodes * 350));
-  const result = await callOpenRouter(messages, { temperature: 0.8, maxTokens: dynamicMaxTokens });
+  const result = await callOpenRouter(messages, { model: config.modelGenerate, temperature: 0.8, maxTokens: dynamicMaxTokens });
 
   return parseAIResponse(result);
 }
@@ -270,7 +288,7 @@ export async function extendDialogue(prompt, npcName, { minNodes = 5, maxNodes =
   ];
 
   const dynamicMaxTokens = Math.min(16384, Math.max(4096, maxNodes * 350));
-  const result = await callOpenRouter(messages, { temperature: 0.8, maxTokens: dynamicMaxTokens });
+  const result = await callOpenRouter(messages, { model: config.modelGenerate, temperature: 0.8, maxTokens: dynamicMaxTokens });
   return parseAIResponse(result);
 }
 

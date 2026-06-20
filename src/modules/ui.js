@@ -211,9 +211,21 @@ export function showAISettingsModal(config, onSave) {
       </div>
 
       <div class="field-group">
-        <label class="field-label">Modelo</label>
-        <input class="field-input" type="text" id="ai-model" value="${config.model || ''}" placeholder="anthropic/claude-sonnet-4">
-        <span class="field-hint">ID del modelo de <a href="https://openrouter.ai/models" target="_blank" style="color:var(--accent-primary)">openrouter.ai/models</a></span>
+        <label class="field-label">Modelo — Generación de Diálogos</label>
+        <input class="field-input" type="text" id="ai-model-generate" value="${config.modelGenerate || ''}" placeholder="anthropic/claude-sonnet-4">
+        <span class="field-hint">Usado para generar y extender diálogos. Recomendado: modelo inteligente.</span>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">Modelo — Traducción</label>
+        <input class="field-input" type="text" id="ai-model-translate" value="${config.modelTranslate || ''}" placeholder="google/gemini-2.5-flash">
+        <span class="field-hint">Usado para traducir ES → EN. Un modelo rápido y barato funciona bien.</span>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">Modelo — Chat Asistente</label>
+        <input class="field-input" type="text" id="ai-model-chat" value="${config.modelChat || ''}" placeholder="google/gemini-2.5-flash">
+        <span class="field-hint">Usado para el chat integrado de IA.</span>
       </div>
 
       <div class="field-row">
@@ -310,7 +322,9 @@ export function showAISettingsModal(config, onSave) {
   $('#modal-confirm').onclick = () => {
     onSave({
       apiKey: $('#ai-api-key').value.trim(),
-      model: $('#ai-model').value.trim(),
+      modelGenerate: $('#ai-model-generate').value.trim(),
+      modelTranslate: $('#ai-model-translate').value.trim(),
+      modelChat: $('#ai-model-chat').value.trim(),
       temperature: parseFloat($('#ai-temperature').value),
       isThinking: $('#ai-thinking').checked,
       contextFiles: contextFiles,

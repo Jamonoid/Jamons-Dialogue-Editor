@@ -220,6 +220,19 @@ export function getNPC(id) {
   return state.npcs.find((n) => n.id === id) || null;
 }
 
+// ─── REORDER (generic for any list) ──────────────────
+export function reorderList(collection, fromIndex, toIndex) {
+  const arr = state[collection];
+  if (!arr || fromIndex < 0 || toIndex < 0 || fromIndex >= arr.length || toIndex >= arr.length) return;
+  if (fromIndex === toIndex) return;
+  pushUndo();
+  const [item] = arr.splice(fromIndex, 1);
+  arr.splice(toIndex, 0, item);
+  emitChange();
+}
+
+
+
 // ─── QUEST CRUD ──────────────────────────────────────
 export function addQuest(name) {
   pushUndo();

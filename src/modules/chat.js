@@ -369,7 +369,7 @@ async function sendMessage() {
 
     const raw = await AI.callAI(
       [{ role: 'system', content: fullSystemPrompt }, ...historyForAPI],
-      { maxTokens: 2048 }
+      { model: aiConfig.modelChat, maxTokens: 2048 }
     );
 
     const { message, actions } = parseAIResponse(raw);

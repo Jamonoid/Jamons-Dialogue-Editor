@@ -411,6 +411,37 @@ body {
   background: rgba(225, 112, 85, 0.12);
 }
 
+/* Drag & drop reordering */
+.section-list-item .item-drag-handle {
+  opacity: 0;
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+  transition: opacity var(--transition-fast);
+  user-select: none;
+  margin-left: -4px;
+  margin-right: -2px;
+}
+.section-list-item:hover .item-drag-handle {
+  opacity: 0.5;
+}
+.section-list-item .item-drag-handle:hover {
+  opacity: 1;
+  cursor: grab;
+}
+.section-list-item.dragging {
+  opacity: 0.35;
+}
+.section-list-item.drag-over-top {
+  box-shadow: inset 0 2px 0 0 var(--accent-primary);
+}
+.section-list-item.drag-over-bottom {
+  box-shadow: inset 0 -2px 0 0 var(--accent-primary);
+}
+
 .empty-state {
   padding: 12px 14px;
   font-size: 12px;

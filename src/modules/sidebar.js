@@ -30,7 +30,8 @@ function renderNPCs() {
   list.innerHTML = npcs
     .map(
       (n) => `
-    <li class="section-list-item" data-type="npc" data-id="${n.id}">
+    <li class="section-list-item" draggable="true" data-type="npc" data-id="${n.id}">
+      <span class="item-drag-handle" title="Arrastrar para reordenar">⠿</span>
       <span class="item-icon npc-icon">N</span>
       <span class="item-name">${esc(n.name)}</span>
       <button class="item-delete" data-delete="npc" data-id="${n.id}" title="Eliminar">×</button>
@@ -54,7 +55,8 @@ function renderQuests() {
   list.innerHTML = quests
     .map(
       (q) => `
-    <li class="section-list-item" data-type="quest" data-id="${q.id}">
+    <li class="section-list-item" draggable="true" data-type="quest" data-id="${q.id}">
+      <span class="item-drag-handle" title="Arrastrar para reordenar">⠿</span>
       <span class="item-icon quest-icon">Q</span>
       <span class="item-name">${esc(q.name)}</span>
       <button class="item-delete" data-delete="quest" data-id="${q.id}" title="Eliminar">×</button>
@@ -80,7 +82,8 @@ function renderDialogues() {
     .map((d) => {
       const npc = npcs.find((n) => n.id === d.npcId);
       return `
-      <li class="section-list-item ${activeId === d.id ? 'active' : ''}" data-type="dialogue" data-id="${d.id}">
+      <li class="section-list-item ${activeId === d.id ? 'active' : ''}" draggable="true" data-type="dialogue" data-id="${d.id}">
+        <span class="item-drag-handle" title="Arrastrar para reordenar">⠿</span>
         <span class="item-icon dialogue-icon">D</span>
         <span class="item-name">${esc(d.title)}${npc ? ` <span style="color:var(--text-muted);font-size:11px">· ${esc(npc.name)}</span>` : ''}</span>
         <button class="item-delete" data-delete="dialogue" data-id="${d.id}" title="Eliminar">×</button>
@@ -156,6 +159,75 @@ function attachListEvents(list, type) {
         else if (deleteType === 'quest') State.deleteQuest(deleteId);
         else if (deleteType === 'dialogue') State.deleteDialogue(deleteId);
       });
+    });
+  });
+
+  // Drag & drop reordering
+  setupDragAndDrop(list, type);
+}
+
+// ─── DRAG & DROP REORDER ─────────────────────────────
+const TYPE_TO_COLLECTION = { npc: 'npcs', quest: 'quests', dialogue: 'dialogues' };
+
+function setupDragAndDrop(list, type) {
+  const items = [...list.querySelectorAll(`.section-list-item[data-type="${type}"]`)];
+  const collection = TYPE_TO_COLLECTION[type];
+  if (!collection) return;
+
+  let draggedEl = null;
+
+  items.forEach((item, index) => {
+    item.dataset.index = index;
+
+    item.addEventListener('dragstart', (e) => {
+      draggedEl = item;
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', index.toString());
+    });
+
+    item.addEventListener('dragend', () => {
+      if (draggedEl) draggedEl.classList.remove('dragging');
+      draggedEl = null;
+      // Clean up all indicators
+      items.forEach(el => {
+        el.classList.remove('drag-over-top', 'drag-over-bottom');
+      });
+    });
+
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (item === draggedEl) return;
+
+      // Determine if cursor is in top or bottom half
+      const rect = item.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      const isAbove = e.clientY < midY;
+
+      // Clear all indicators, then set the right one
+      items.forEach(el => el.classList.remove('drag-over-top', 'drag-over-bottom'));
+      item.classList.add(isAbove ? 'drag-over-top' : 'drag-over-bottom');
+    });
+
+    item.addEventListener('dragleave', () => {
+      item.classList.remove('drag-over-top', 'drag-over-bottom');
+    });
+
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (item === draggedEl) return;
+
+      const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+      const rect = item.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      let toIndex = parseInt(item.dataset.index);
+
+      // If dropping on the bottom half, insert after this item
+      if (e.clientY >= midY && toIndex < fromIndex) toIndex++;
+      if (e.clientY < midY && toIndex > fromIndex) toIndex--;
+
+      State.reorderList(collection, fromIndex, toIndex);
     });
   });
 }

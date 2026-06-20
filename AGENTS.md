@@ -127,20 +127,32 @@ Translation prompts explicitly instruct the AI to preserve profanity, slang, and
 #### Configuration (stored in localStorage)
 ```js
 {
-  apiKey: string,           // OpenRouter API key
-  model: string,            // Free-text model ID (e.g. 'anthropic/claude-sonnet-4')
-  temperature: number,      // Default 0.7
-  isThinking: boolean,      // Strip <thinking> blocks from response
+  apiKey: string,              // OpenRouter API key
+  modelGenerate: string,       // Model for dialogue generation & extension (e.g. 'anthropic/claude-sonnet-4')
+  modelTranslate: string,      // Model for ES→EN translation (e.g. 'google/gemini-2.5-flash')
+  modelChat: string,           // Model for the integrated chat assistant
+  temperature: number,         // Default 0.7
+  isThinking: boolean,         // Strip <thinking> blocks from response
   contextFiles: [{name, text}],  // Multiple PDF/MD/TXT files for context
-  contextPrompt: string     // Global context prompt
+  contextPrompt: string        // Global context prompt
 }
 ```
+Legacy configs with a single `model` field are auto-migrated to all three on first load.
 
 #### Translation (ES → EN only)
 - `translateNode(nodeId)` — Translates a single node's Spanish text to English
 - `translateAllNodes()` — Batch-translates all nodes that have ES text but no EN text
 - All prompts sent to the AI are in **English**
 - Accessible from: toolbar button, inspector (per-node or per-dialogue)
+
+## Future Plans
+
+- **Search**: Find nodes by text content.
+- **Dialogue Simulator**: Interactive chat modal to test dialogue trees.
+- **Minimap**: Visual overview of large dialogue trees.
+- ~~**Sidebar Drag & Drop**~~: ✅ Implemented — Reorder NPCs, Quests, Dialogues by dragging items in the sidebar. Uses `State.reorderList(collection, fromIndex, toIndex)`.
+- **Copy/Paste Nodes**: Ctrl+C/V for duplicating nodes.
+- **Project Statistics**: Dashboard showing total NPCs, nodes, translation coverage.
 
 #### Dialogue Generation
 - `generateDialogue(prompt, npcName)` — Generates a branching dialogue tree from a prompt
@@ -189,3 +201,16 @@ npm run build    # Build for production (dist/)
 - **Connection Navigation Click Guards**: Clicking a connection card in the inspector navigates to the target node, but any clicks targeting child action buttons like deletion (`.conn-delete`) or reordering (`.conn-reorder`) are explicitly ignored by checking event targets to prevent unwanted navigation.
 - **Color Resiliency Guards**: When rendering nodes or inspector cards for NPCs, check for null/undefined color values (`npc.color`) before applying inline style overrides (e.g. `undefined20` hex overrides) to prevent breaking css rules on legacy data.
 
+## Bugs & Inconsistencies Analysis (June 2026)
+
+A systematic analysis of the codebase was conducted and the following bugs were **confirmed and fixed**:
+- **Undo/Redo Fragmentation** (FIXED): Multi-delete and multi-duplicate now use `startBatch()/endBatch()` for atomic undo. Node resize now registers an undo checkpoint.
+- **Performance** (FIXED): Batch translation (`translateAllNodes`) now uses `startBatch()/endBatch()` instead of triggering N individual re-renders.
+- **UI Desynchronization** (FIXED): Sidebar modals now call `State.notifyChange()` after editing NPC/Quest/Dialogue names to trigger an immediate re-render.
+- **Chat Actions** (FIXED): The chat executor now always batches actions (`mutatingActions.length > 0` instead of `> 1`).
+
+Remaining item (not a bug): Canvas re-renders fully when editing node text in the Inspector panel. This is a performance concern for large dialogues (15+ nodes) that would require canvas rendering refactoring.
+
+False positives discarded: NPC color picker undo (already handled via `focus` event), inspector crash on NPC deletion (already has a null guard).
+
+See [Analisis de bugs posibles.md](file:///c:/Users/Benja/Desktop/NWBI/NWBI_Repo/Dialogues/Analisis%20de%20bugs%20posibles.md) for the full verified report.
