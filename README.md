@@ -1,121 +1,121 @@
 # Dialogue Forge
 
-A visual dialogue tree editor built for game development. Create branching conversations, manage NPCs and quests, translate between languages, and generate dialogue with AI — all from a single desktop application.
+Editor visual de árboles de diálogo construido para el desarrollo de videojuegos. Crea conversaciones ramificadas, gestiona NPCs y quests, traduce entre idiomas y genera diálogos con IA — todo desde una sola aplicación de escritorio.
 
-Built with Electron, Vite, and vanilla JavaScript. No frameworks.
+Construido con Electron, Vite y JavaScript vanilla. Sin frameworks.
 
 ---
 
-## Features
+## Funcionalidades
 
-### Visual Dialogue Editor
-- Node-based canvas for creating and connecting dialogue lines
-- Drag-and-drop node positioning with auto-layout for branching trees
-- Inline text editing on the canvas or in the inspector panel
-- Conditional branching with `IF` conditions and `DO` actions on connections
-- Multi-select, duplicate, and batch-delete nodes
-- Full undo/redo history (Ctrl+Z / Ctrl+Y)
+### Editor Visual de Diálogos
+- Canvas basado en nodos para crear y conectar líneas de diálogo
+- Posicionamiento de nodos con arrastrar y soltar, con auto-layout para árboles ramificados
+- Edición de texto inline en el canvas o en el panel inspector
+- Ramificación condicional con condiciones `IF` y acciones `DO` en las conexiones
+- Multi-selección, duplicación y eliminación en lote de nodos
+- Historial completo de deshacer/rehacer (Ctrl+Z / Ctrl+Y)
 
-### Project Management
-- Manage NPCs, Quests, and Dialogues from a collapsible sidebar
-- Drag-and-drop reordering of NPCs, Quests, and Dialogues
-- Custom NPC colors for visual identification on the canvas
-- Assign dialogues to NPCs and Quests
-- Save/load projects as `.json` files with auto-save to localStorage
-- Export/import for backup and version control
+### Gestión de Proyecto
+- Gestión de NPCs, Quests y Diálogos desde una barra lateral colapsable
+- Reordenamiento con arrastrar y soltar de NPCs, Quests y Diálogos
+- Colores personalizados para NPCs para identificación visual en el canvas
+- Asignación de diálogos a NPCs y Quests
+- Guardar/cargar proyectos como archivos `.json` con auto-guardado en localStorage
+- Exportar/importar para respaldo y control de versiones
 
-### Bilingual Support (ES / EN)
-- Every dialogue node supports both Spanish and English text
-- Language toggle in the toolbar switches the editing view
-- AI-powered batch translation (ES to EN) for the active dialogue
-- Per-node translation from the inspector panel
+### Soporte Bilingüe (ES / EN)
+- Cada nodo de diálogo admite texto en español e inglés
+- El toggle de idioma en la barra de herramientas cambia la vista de edición
+- Traducción en lote con IA (ES a EN) para el diálogo activo
+- Traducción por nodo desde el panel inspector
 
-### AI Integration (via OpenRouter)
-- **Dialogue Generation**: Describe a conversation and the AI creates a full branching dialogue tree with nodes and connections
-- **Dialogue Extension**: Extend existing dialogues from leaf nodes
-- **Translation**: Translate individual nodes or entire dialogues
-- **Chat Assistant**: An integrated chat panel that can read the active dialogue, create nodes, update text, and modify connections through structured actions
-- **Separate models per task**: Configure different LLMs for generation (e.g., Claude Sonnet), translation (e.g., Gemini Flash), and chat independently
-- **Context files**: Upload PDF, Markdown, or text files with world lore that get injected into AI prompts
+### Integración de IA (via OpenRouter)
+- **Generación de diálogos**: Describe una conversación y la IA crea un árbol de diálogo ramificado completo con nodos y conexiones
+- **Extensión de diálogos**: Extiende diálogos existentes desde nodos hoja
+- **Traducción**: Traduce nodos individuales o diálogos completos
+- **Asistente de chat**: Un panel de chat integrado que puede leer el diálogo activo, crear nodos, actualizar texto y modificar conexiones mediante acciones estructuradas
+- **Modelos separados por tarea**: Configura diferentes LLMs para generación (ej. Claude Sonnet), traducción (ej. Gemini Flash) y chat de forma independiente
+- **Archivos de contexto**: Sube archivos PDF, Markdown o texto con lore del mundo que se inyectan en los prompts de IA
 
 ### Audio Slicer
-A built-in tool for splitting voice acting recordings into individual dialogue clips:
-- Upload audio files (.wav, .mp3, .ogg) via drag-and-drop or file picker
-- Waveform visualization rendered on canvas
-- Click to place cut markers, drag to adjust, right-click to delete
-- Shift+Click to set the playback start position (playhead)
-- Preview individual segments before exporting
-- Editable segment names
-- Export all segments as a .zip of .wav files, or download individually
-- Zoom and horizontal scroll for navigating long recordings
+Herramienta integrada para dividir grabaciones de voz en clips de diálogo individuales:
+- Carga archivos de audio (.wav, .mp3, .ogg) mediante arrastrar y soltar o selector de archivos
+- Visualización de la forma de onda renderizada en canvas
+- Clic para colocar marcadores de corte, arrastrar para ajustar, clic derecho para eliminar
+- Shift+Clic para establecer la posición de inicio de reproducción (playhead)
+- Previsualización de segmentos individuales antes de exportar
+- Nombres de segmentos editables
+- Exportar todos los segmentos como un .zip de archivos .wav, o descargar individualmente
+- Zoom y scroll horizontal para navegar grabaciones largas
 
 ---
 
-## Requirements
+## Requisitos
 
-- Node.js (v18 or later recommended)
+- Node.js (v18 o posterior recomendado)
 
-## Installation
+## Instalación
 
 ```bash
 npm install
 ```
 
-## Commands
+## Comandos
 
-| Command | Description |
+| Comando | Descripción |
 |---------|-------------|
-| `npm run dev` | Start Vite dev server + Electron in parallel |
-| `npm run build` | Build the frontend for production (`dist/`) |
-| `npm run dist` | Build frontend + package as Windows installer (NSIS) |
+| `npm run dev` | Inicia el servidor de desarrollo Vite + Electron en paralelo |
+| `npm run build` | Compila el frontend para producción (`dist/`) |
+| `npm run dist` | Compila el frontend + empaqueta como instalador para Windows (NSIS) |
 
-## Keyboard Shortcuts
+## Atajos de Teclado
 
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+S | Save project to file |
-| Ctrl+O | Open project file |
-| Ctrl+Z | Undo |
-| Ctrl+Y | Redo |
-| Ctrl+D | Duplicate selected nodes |
-| Ctrl+A | Select all nodes |
-| Delete | Delete selected nodes |
-| Escape | Deselect / close overlay |
-| Space | Play/pause (in Audio Slicer) |
+| Atajo | Acción |
+|-------|--------|
+| Ctrl+S | Guardar proyecto en archivo |
+| Ctrl+O | Abrir archivo de proyecto |
+| Ctrl+Z | Deshacer |
+| Ctrl+Y | Rehacer |
+| Ctrl+D | Duplicar nodos seleccionados |
+| Ctrl+A | Seleccionar todos los nodos |
+| Delete | Eliminar nodos seleccionados |
+| Escape | Deseleccionar / cerrar overlay |
+| Espacio | Reproducir/pausar (en Audio Slicer) |
 
-## Project Structure
+## Estructura del Proyecto
 
 ```
 Dialogues/
-  electron/          Electron main process
-    main.js          Window management, IPC, file dialogs
-    preload.js       Secure bridge between renderer and main
+  electron/          Proceso principal de Electron
+    main.js          Gestión de ventanas, IPC, diálogos de archivo
+    preload.js       Puente seguro entre renderer y main
   src/
-    main.js          App entry point, module wiring
-    style.css        All styles (CSS custom properties, no frameworks)
+    main.js          Punto de entrada de la app, conexión de módulos
+    style.css        Todos los estilos (custom properties CSS, sin frameworks)
     utils/
-      helpers.js     DOM helpers, escaping, UID generation
+      helpers.js     Helpers de DOM, escape de strings, generación de UIDs
     modules/
-      state.js       Central state management, undo/redo, persistence
-      canvas.js      Canvas rendering, pan/zoom, node layout
-      nodes.js       Node DOM rendering, inline editing, resize
-      inspector.js   Right panel for editing node/NPC/quest properties
-      sidebar.js     Left panel with NPC/quest/dialogue lists
-      ai.js          OpenRouter API integration, translation, generation
-      chat.js        AI chat assistant with structured actions
-      prompts.js     System prompts for AI generation and extension
-      lang.js        Language toggle (ES/EN)
-      ui.js          Modals, toasts, context menus, settings UI
-      audio-slicer.js  Audio splitting tool
-      wav-encoder.js   Pure JS WAV file encoder
-  index.html         App shell
-  vite.config.js     Vite configuration
-  package.json       Dependencies and build scripts
+      state.js       Gestión central del estado, deshacer/rehacer, persistencia
+      canvas.js      Renderizado del canvas, pan/zoom, layout de nodos
+      nodes.js       Renderizado de nodos en DOM, edición inline, resize
+      inspector.js   Panel derecho para editar propiedades de nodo/NPC/quest
+      sidebar.js     Panel izquierdo con listas de NPCs/quests/diálogos
+      ai.js          Integración con la API de OpenRouter, traducción, generación
+      chat.js        Asistente de chat con IA y acciones estructuradas
+      prompts.js     System prompts para generación y extensión de diálogos
+      lang.js        Toggle de idioma (ES/EN)
+      ui.js          Modales, toasts, menús contextuales, UI de configuración
+      audio-slicer.js  Herramienta de división de audio
+      wav-encoder.js   Codificador de archivos WAV en JS puro
+  index.html         Shell de la aplicación
+  vite.config.js     Configuración de Vite
+  package.json       Dependencias y scripts de compilación
 ```
 
-## Data Format
+## Formato de Datos
 
-Projects are stored as JSON with the following structure:
+Los proyectos se guardan como JSON con la siguiente estructura:
 
 ```json
 {
