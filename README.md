@@ -137,7 +137,3 @@ Projects are stored as JSON with the following structure:
   }]
 }
 ```
-
-## License
-
-Private project. Not licensed for redistribution.
