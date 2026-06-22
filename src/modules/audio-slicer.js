@@ -678,7 +678,8 @@ function renderSegmentList() {
       index: i,
       start: allTimes[i],
       end: allTimes[i + 1],
-      name: `${fileName}_${String(i + 1).padStart(3, '0')}`,
+      // Default base name (no numeric prefix — that's added on export)
+      baseName: `${fileName}_${String(i + 1).padStart(2, '0')}`,
     });
   }
 
@@ -690,7 +691,7 @@ function renderSegmentList() {
   list.innerHTML = segments.map((seg) => `
     <div class="slicer-segment" data-index="${seg.index}">
       <span class="slicer-seg-num">${seg.index + 1}</span>
-      <input class="slicer-seg-name" type="text" value="${seg.name}" data-index="${seg.index}" spellcheck="false">
+      <input class="slicer-seg-name" type="text" value="${seg.baseName}" data-index="${seg.index}" spellcheck="false" placeholder="nombre_segmento">
       <button class="slicer-seg-play" data-start="${seg.start}" data-end="${seg.end}" title="Reproducir segmento">
         <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       </button>
@@ -717,11 +718,13 @@ function getSegments() {
 
   for (let i = 0; i < allTimes.length - 1; i++) {
     const nameInput = list?.querySelector(`.slicer-seg-name[data-index="${i}"]`);
+    const baseName = nameInput?.value.trim() || `${fileName}_${String(i + 1).padStart(2, '0')}`;
     segments.push({
       index: i,
       start: allTimes[i],
       end: allTimes[i + 1],
-      name: nameInput?.value || `${fileName}_${String(i + 1).padStart(3, '0')}`,
+      // Final filename: 01_basename, 02_basename, etc.
+      name: `${String(i + 1).padStart(2, '0')}_${baseName}`,
     });
   }
   return segments;
@@ -766,13 +769,41 @@ async function exportIndividual() {
   }
 
   const segments = getSegments();
+  const btn = document.querySelector('#slicer-export-single');
+
+  // ── Electron path: one folder dialog, write all files directly ──
+  if (window.electronAPI?.pickAudioFolder) {
+    const folderPath = await window.electronAPI.pickAudioFolder();
+    if (!folderPath) return; // user cancelled
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Exportando...'; }
+    try {
+      const files = [];
+      for (const seg of segments) {
+        const startSample = Math.floor(seg.start * audioBuffer.sampleRate);
+        const endSample = Math.floor(seg.end * audioBuffer.sampleRate);
+        const wavData = encodeWAV(audioBuffer, startSample, endSample);
+        // Transfer as plain array so it survives IPC serialization
+        files.push({ name: `${seg.name}.wav`, data: Array.from(new Uint8Array(wavData)) });
+      }
+      const written = await window.electronAPI.writeAudioFiles(folderPath, files);
+      alert(`${written.length} archivos exportados en:\n${folderPath}`);
+    } catch (err) {
+      console.error('Export error:', err);
+      alert('Error al exportar: ' + err.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Exportar individuales'; }
+    }
+    return;
+  }
+
+  // ── Fallback (browser): download one by one ──
   for (const seg of segments) {
     const startSample = Math.floor(seg.start * audioBuffer.sampleRate);
     const endSample = Math.floor(seg.end * audioBuffer.sampleRate);
     const wavData = encodeWAV(audioBuffer, startSample, endSample);
     const blob = new Blob([wavData], { type: 'audio/wav' });
     downloadBlob(blob, `${seg.name}.wav`);
-    // Small delay between downloads to avoid browser blocking
     await new Promise((r) => setTimeout(r, 200));
   }
 }

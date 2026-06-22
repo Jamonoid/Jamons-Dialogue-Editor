@@ -107,6 +107,31 @@ ipcMain.on('set-title', (event, title) => {
   if (win) win.setTitle(title);
 });
 
+// Pick folder for audio export
+ipcMain.handle('audio:pick-folder', async () => {
+  const win = BrowserWindow.getFocusedWindow();
+  const result = await dialog.showOpenDialog(win, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: 'Seleccionar carpeta de exportación',
+    buttonLabel: 'Exportar aquí',
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+// Write binary files to a folder
+ipcMain.handle('audio:write-files', async (event, { folderPath, files }) => {
+  // files: [{ name: string, data: number[] }]
+  const results = [];
+  for (const file of files) {
+    const filePath = path.join(folderPath, file.name);
+    const buffer = Buffer.from(file.data);
+    await fs.writeFile(filePath, buffer);
+    results.push(filePath);
+  }
+  return results;
+});
+
 // ─── APP LIFECYCLE ───────────────────────────────────
 
 app.whenReady().then(createWindow);
