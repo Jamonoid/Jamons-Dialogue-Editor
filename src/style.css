@@ -449,6 +449,165 @@ body {
   font-style: italic;
 }
 
+/* Dialogue view controls: filter / group / sort */
+.dialogue-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 12px 8px;
+}
+
+.sidebar-section.collapsed .dialogue-controls {
+  display: none;
+}
+
+.dialogue-filter-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.dialogue-filter-icon {
+  position: absolute;
+  left: 8px;
+  width: 13px;
+  height: 13px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.dialogue-filter-input {
+  width: 100%;
+  padding: 6px 24px 6px 26px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  transition: border-color var(--transition-fast);
+}
+
+.dialogue-filter-input::placeholder {
+  color: var(--text-muted);
+}
+
+.dialogue-filter-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.dialogue-filter-clear {
+  position: absolute;
+  right: 6px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: all var(--transition-fast);
+}
+
+.dialogue-filter-clear:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.dialogue-controls-row {
+  display: flex;
+  gap: 6px;
+}
+
+.dialogue-control {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.dialogue-control-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  padding-left: 2px;
+}
+
+.dialogue-select {
+  width: 100%;
+  padding: 5px 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.dialogue-select:hover {
+  border-color: var(--border-subtle);
+}
+
+.dialogue-select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.dialogue-select option {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+/* Group headers within the dialogue list */
+.dialogue-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 4px;
+  margin-top: 2px;
+  list-style: none;
+  cursor: default;
+}
+
+.dialogue-group-header:first-child {
+  margin-top: 0;
+}
+
+.dialogue-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialogue-group-count {
+  flex-shrink: 0;
+  min-width: 16px;
+  text-align: center;
+  padding: 1px 6px;
+  background: var(--bg-elevated);
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
 /* ===== CANVAS ===== */
 #canvas-container {
   position: relative;
@@ -2300,10 +2459,60 @@ body {
   color: var(--text-muted);
 }
 
+.slicer-seg-prefix {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
 /* ─── Export Bar ─── */
 .slicer-export-bar {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding-top: 12px;
   flex-shrink: 0;
+}
+
+.slicer-export-spacer {
+  flex: 1;
+}
+
+.slicer-prefix-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.slicer-prefix-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.slicer-prefix-input {
+  width: 180px;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.slicer-prefix-input:focus {
+  border-color: var(--accent-primary);
+}
+
+.slicer-prefix-input::placeholder {
+  color: var(--text-muted);
 }

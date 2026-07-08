@@ -201,32 +201,43 @@ export function showAISettingsModal(config, onSave) {
   const overlay = $('#modal-overlay');
   const modal = $('#modal');
 
+  // Per-task provider + model rows. Providers: OpenRouter (HTTP) | Claude Code (local CLI).
+  const TASK_ROWS = [
+    { key: 'generate', label: 'Generación de Diálogos', orPlaceholder: 'anthropic/claude-sonnet-4', orHint: 'Usado para generar y extender diálogos. Recomendado: modelo inteligente.' },
+    { key: 'translate', label: 'Traducción', orPlaceholder: 'google/gemini-2.5-flash', orHint: 'Usado para traducir ES → EN. Un modelo rápido y barato funciona bien.' },
+    { key: 'chat', label: 'Chat Asistente', orPlaceholder: 'google/gemini-2.5-flash', orHint: 'Usado para el chat integrado de IA.' },
+  ];
+  const CLAUDE_HINT = 'Usa tu suscripción de Claude (CLI de Claude Code instalado y logueado). Alias: sonnet, opus, haiku.';
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+  const taskRowsHTML = TASK_ROWS.map((t) => {
+    const provider = config[`provider${cap(t.key)}`] || 'openrouter';
+    const isClaude = provider === 'claude';
+    return `
+      <div class="field-group">
+        <label class="field-label">${t.label}</label>
+        <div class="field-row" style="gap:8px">
+          <select class="field-input" id="ai-provider-${t.key}" style="flex:0 0 150px">
+            <option value="openrouter" ${!isClaude ? 'selected' : ''}>OpenRouter</option>
+            <option value="claude" ${isClaude ? 'selected' : ''}>Claude Code</option>
+          </select>
+          <input class="field-input" type="text" id="ai-model-${t.key}" value="${config[`model${cap(t.key)}`] || ''}"
+            placeholder="${isClaude ? 'sonnet' : t.orPlaceholder}" style="flex:1">
+        </div>
+        <span class="field-hint" id="ai-hint-${t.key}">${isClaude ? CLAUDE_HINT : t.orHint}</span>
+      </div>`;
+  }).join('');
+
   modal.innerHTML = `
     <div class="modal-header"><h3>⚙ Configuración de IA</h3></div>
     <div class="modal-body ai-settings-body">
       <div class="field-group">
         <label class="field-label">API Key de OpenRouter</label>
         <input class="field-input" type="password" id="ai-api-key" value="${config.apiKey || ''}" placeholder="sk-or-v1-...">
-        <span class="field-hint">Obtén tu key en <a href="https://openrouter.ai/keys" target="_blank" style="color:var(--accent-primary)">openrouter.ai/keys</a></span>
+        <span class="field-hint">Obtén tu key en <a href="https://openrouter.ai/keys" target="_blank" style="color:var(--accent-primary)">openrouter.ai/keys</a>. Solo se usa con el proveedor OpenRouter.</span>
       </div>
 
-      <div class="field-group">
-        <label class="field-label">Modelo — Generación de Diálogos</label>
-        <input class="field-input" type="text" id="ai-model-generate" value="${config.modelGenerate || ''}" placeholder="anthropic/claude-sonnet-4">
-        <span class="field-hint">Usado para generar y extender diálogos. Recomendado: modelo inteligente.</span>
-      </div>
-
-      <div class="field-group">
-        <label class="field-label">Modelo — Traducción</label>
-        <input class="field-input" type="text" id="ai-model-translate" value="${config.modelTranslate || ''}" placeholder="google/gemini-2.5-flash">
-        <span class="field-hint">Usado para traducir ES → EN. Un modelo rápido y barato funciona bien.</span>
-      </div>
-
-      <div class="field-group">
-        <label class="field-label">Modelo — Chat Asistente</label>
-        <input class="field-input" type="text" id="ai-model-chat" value="${config.modelChat || ''}" placeholder="google/gemini-2.5-flash">
-        <span class="field-hint">Usado para el chat integrado de IA.</span>
-      </div>
+      ${taskRowsHTML}
 
       <div class="field-row">
         <div class="field-group" style="flex:1">
@@ -259,6 +270,16 @@ export function showAISettingsModal(config, onSave) {
   `;
 
   overlay.classList.add('active');
+
+  // Provider selects: update model placeholder + hint when switching provider
+  TASK_ROWS.forEach((t) => {
+    const select = $(`#ai-provider-${t.key}`);
+    select.addEventListener('change', () => {
+      const isClaude = select.value === 'claude';
+      $(`#ai-model-${t.key}`).placeholder = isClaude ? 'sonnet' : t.orPlaceholder;
+      $(`#ai-hint-${t.key}`).textContent = isClaude ? CLAUDE_HINT : t.orHint;
+    });
+  });
 
   // Temperature slider live update
   const tempSlider = $('#ai-temperature');
@@ -320,17 +341,33 @@ export function showAISettingsModal(config, onSave) {
   overlay.onmousedown = (e) => { if (e.target === overlay) close(); };
 
   $('#modal-confirm').onclick = () => {
+    const usesClaude = TASK_ROWS.some((t) => $(`#ai-provider-${t.key}`).value === 'claude');
     onSave({
       apiKey: $('#ai-api-key').value.trim(),
       modelGenerate: $('#ai-model-generate').value.trim(),
       modelTranslate: $('#ai-model-translate').value.trim(),
       modelChat: $('#ai-model-chat').value.trim(),
+      providerGenerate: $('#ai-provider-generate').value,
+      providerTranslate: $('#ai-provider-translate').value,
+      providerChat: $('#ai-provider-chat').value,
       temperature: parseFloat($('#ai-temperature').value),
       isThinking: $('#ai-thinking').checked,
       contextFiles: contextFiles,
     });
     close();
     toast('Configuración de IA guardada', 'success');
+
+    // If Claude Code is selected for any task, verify the CLI is available
+    if (usesClaude) {
+      const api = window.electronAPI;
+      if (!api || !api.claudeCheck) {
+        toast('Claude Code solo funciona en la app de escritorio (Electron).', 'error');
+      } else {
+        api.claudeCheck().then((res) => {
+          if (!res?.ok) toast(res?.error || 'Claude Code no está disponible.', 'error');
+        }).catch(() => {});
+      }
+    }
   };
 }
 

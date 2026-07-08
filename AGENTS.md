@@ -14,14 +14,17 @@
 | **Vanilla CSS** | Styling — dark theme, no Tailwind |
 | **localStorage** | Data persistence |
 | **JSON** | Export/import format |
-| **OpenRouter API** | AI translation & dialogue generation |
+| **OpenRouter API** | AI translation & dialogue generation (HTTP, per-token) |
+| **Claude Code CLI** | Alternative AI provider using the local Claude subscription (no API key) |
+| **MCP (Model Context Protocol)** | Embedded server so external Claude Code / CLI can drive the app |
 
 ## Architecture
 
 ```
 electron/
-  main.js          → Electron main process (window creation)
+  main.js          → Electron main process (window creation, IPC, Claude Code spawn, MCP server startup)
   preload.js       → Secure bridge between main and renderer
+  mcp-server.js    → Embedded MCP server (Streamable HTTP on 127.0.0.1:4747) exposing project tools
 
 src/
   main.js          → App entry point, wires all modules together
@@ -34,8 +37,9 @@ src/
     sidebar.js     → Left panel: NPC/Quest/Dialogue lists, collapsible sections
     ui.js          → Modals, toasts, context menus, confirmDelete, AI settings/generate modals
     lang.js        → Language toggle (ES/EN)
-    ai.js          → OpenRouter API: translation (ES→EN), dialogue generation, PDF/MD parsing
+    ai.js          → Multi-provider AI: OpenRouter (HTTP) + Claude Code (local CLI via IPC); per-task dispatcher, translation, generation, PDF/MD parsing
     chat.js        → Integrated AI chat assistant: floating panel, action executor, project context builder
+    mcp-bridge.js  → Renderer-side executor for MCP tools (window.__mcpExecute); runs edits against live State
     prompts.js     → Centralized AI prompt templates (translation, generation, extension, chat)
   utils/
     helpers.js     → uid(), $(), $$(), esc()
@@ -112,7 +116,35 @@ Toggled via the ⬥ button in canvas controls. When active, node positions snap 
 #### Connection Right-Click
 SVG connection paths render with invisible fat hit-areas (12px stroke) for easier clicking. Right-click shows a context menu to delete the connection.
 
-### AI Integration (OpenRouter)
+### AI Integration (multi-provider)
+
+The `ai.js` module supports two AI providers, selectable **per task** (generate / translate / chat):
+
+- **OpenRouter** — HTTP API, needs an API key, pay-per-token. `callOpenRouter()`.
+- **Claude Code** — runs the user's locally installed `claude` CLI via Electron IPC (`window.electronAPI.claudeCall`), using the Claude Pro/Max subscription (no API key). `callClaudeCode()`. Desktop-only.
+
+`callProvider(messages, { task })` is the dispatcher: it reads `config.provider{Generate,Translate,Chat}` (`'openrouter' | 'claude'`) and routes accordingly. All internal call sites go through it. All prompt templates are centralized in `prompts.js`.
+
+#### Claude Code provider (Electron main)
+- `electron/main.js` spawns `claude -p --output-format json --model <model>`; the system prompt + prompt are sent via **stdin** (avoids Windows arg-length/escaping limits). The model arg is regex-validated (`/^[a-zA-Z0-9._-]+$/`).
+- IPC handlers: `ai:claude-call` (generation), `ai:claude-check` (CLI availability). Both return `{ ok, text | error }` with friendly Spanish messages for not-logged-in / rate-limit / overload.
+- Requires the `claude` CLI on the system PATH and a logged-in session (`claude` → `/login`).
+- Model field accepts aliases: `sonnet`, `opus`, `haiku` (defaults to `sonnet`).
+
+### External control via MCP
+
+An **embedded MCP server** (`electron/mcp-server.js`, Streamable HTTP on `http://127.0.0.1:4747/mcp`) lets an *external* Claude Code session — e.g. from your GDD/story repo — read and edit the project without using the in-app chat. It boots in `app.whenReady()` and forwards each tool call to the renderer via `win.webContents.executeJavaScript('window.__mcpExecute(...)')`, so edits run on the live canvas with normal undo/redo and persistence.
+
+Register once (user scope, available from any repo) while Dialogue Forge is open:
+```bash
+claude mcp add --transport http --scope user dialogue-forge http://127.0.0.1:4747/mcp
+```
+
+Tools (`src/modules/mcp-bridge.js`, all operate on the **active** dialogue unless noted):
+- **Read**: `get_project_summary`, `get_dialogue`
+- **Edit**: `create_dialogue`, `set_active_dialogue`, `add_node`, `update_node`, `connect_nodes`, `delete_node`, `set_start_node`, `create_npc`, `auto_layout`
+
+The MCP server only responds while the app window is open; tool calls return `{ ok: false, error }` if the window is closed or the bridge hasn't loaded.
 
 The `ai.js` module integrates with the OpenRouter API. All prompt templates are centralized in `prompts.js` for easy editing.
 
@@ -127,17 +159,20 @@ Translation prompts explicitly instruct the AI to preserve profanity, slang, and
 #### Configuration (stored in localStorage)
 ```js
 {
-  apiKey: string,              // OpenRouter API key
-  modelGenerate: string,       // Model for dialogue generation & extension (e.g. 'anthropic/claude-sonnet-4')
+  apiKey: string,              // OpenRouter API key (only used by the OpenRouter provider)
+  modelGenerate: string,       // Model for dialogue generation & extension (e.g. 'anthropic/claude-sonnet-4' or 'sonnet')
   modelTranslate: string,      // Model for ES→EN translation (e.g. 'google/gemini-2.5-flash')
   modelChat: string,           // Model for the integrated chat assistant
-  temperature: number,         // Default 0.7
+  providerGenerate: string,    // 'openrouter' | 'claude' — provider for generation/extension
+  providerTranslate: string,   // 'openrouter' | 'claude' — provider for translation
+  providerChat: string,        // 'openrouter' | 'claude' — provider for chat
+  temperature: number,         // Default 0.7 (OpenRouter only)
   isThinking: boolean,         // Strip <thinking> blocks from response
   contextFiles: [{name, text}],  // Multiple PDF/MD/TXT files for context
   contextPrompt: string        // Global context prompt
 }
 ```
-Legacy configs with a single `model` field are auto-migrated to all three on first load.
+Legacy configs with a single `model` field are auto-migrated to all three on first load. Missing `provider*` fields default to `'openrouter'`. The settings modal (`ui.js`) shows a provider dropdown next to each per-task model input; the model field placeholder/hint switches between OpenRouter model IDs and Claude aliases based on the selected provider.
 
 #### Translation (ES → EN only)
 - `translateNode(nodeId)` — Translates a single node's Spanish text to English

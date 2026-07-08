@@ -7,6 +7,32 @@ import { showModal, showContextMenu, toast, confirmDelete } from './ui.js';
 
 let onSelectCallback = null;
 
+// ─── DIALOGUE VIEW PREFS (group / sort / filter) ─────
+const DIALOGUE_VIEW_KEY = 'df_dialogue_view';
+const dialogueView = loadDialogueView();
+let dialogueFilter = ''; // in-memory only (not persisted)
+
+function loadDialogueView() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DIALOGUE_VIEW_KEY) || '{}');
+    return {
+      groupBy: ['none', 'npc', 'quest'].includes(saved.groupBy) ? saved.groupBy : 'none',
+      sortBy: ['manual', 'title-asc', 'title-desc'].includes(saved.sortBy) ? saved.sortBy : 'manual',
+    };
+  } catch {
+    return { groupBy: 'none', sortBy: 'manual' };
+  }
+}
+
+function saveDialogueView() {
+  try {
+    localStorage.setItem(
+      DIALOGUE_VIEW_KEY,
+      JSON.stringify({ groupBy: dialogueView.groupBy, sortBy: dialogueView.sortBy })
+    );
+  } catch (e) {}
+}
+
 export function onSelect(cb) {
   onSelectCallback = cb;
 }
@@ -68,34 +94,125 @@ function renderQuests() {
   attachListEvents(list, 'quest');
 }
 
+function dialogueItemHTML(d, index, activeId, npcById, draggable) {
+  const npc = npcById.get(d.npcId);
+  // Hide the NPC suffix when we're already grouping by NPC (redundant).
+  const showNpc = npc && dialogueView.groupBy !== 'npc';
+  const npcColor = npc && npc.color ? npc.color : null;
+  return `
+    <li class="section-list-item ${activeId === d.id ? 'active' : ''}" ${draggable ? 'draggable="true"' : ''} data-type="dialogue" data-id="${d.id}" data-index="${index}">
+      ${draggable ? '<span class="item-drag-handle" title="Arrastrar para reordenar">⠿</span>' : ''}
+      <span class="item-icon dialogue-icon"${npcColor ? ` style="background:${npcColor}20;color:${npcColor};border-color:${npcColor}33"` : ''}>D</span>
+      <span class="item-name">${esc(d.title)}${showNpc ? ` <span style="color:var(--text-muted);font-size:11px">· ${esc(npc.name)}</span>` : ''}</span>
+      <button class="item-delete" data-delete="dialogue" data-id="${d.id}" title="Eliminar">×</button>
+    </li>`;
+}
+
+function sortDialogueItems(items) {
+  const { sortBy } = dialogueView;
+  if (sortBy === 'manual') return items.slice().sort((a, b) => a.index - b.index);
+  const dir = sortBy === 'title-desc' ? -1 : 1;
+  return items.slice().sort(
+    (a, b) =>
+      dir *
+      (a.d.title || '').localeCompare(b.d.title || '', 'es', { sensitivity: 'base' })
+  );
+}
+
 function renderDialogues() {
   const list = $('#dialogue-list');
-  const { dialogues, npcs } = State.getState();
+  const { dialogues, npcs, quests } = State.getState();
   const activeId = State.getActiveDialogueId();
+
+  // Keep the filter clear button in sync with the input's content.
+  const clearBtn = $('#dialogue-filter-clear');
+  if (clearBtn) clearBtn.style.display = dialogueFilter ? '' : 'none';
 
   if (dialogues.length === 0) {
     list.innerHTML = '<li class="empty-state">Sin diálogos aún</li>';
     return;
   }
 
-  list.innerHTML = dialogues
-    .map((d) => {
-      const npc = npcs.find((n) => n.id === d.npcId);
+  const npcById = new Map(npcs.map((n) => [n.id, n]));
+  const questById = new Map(quests.map((q) => [q.id, q]));
+
+  // Preserve the original index so manual order / reordering still works.
+  let items = dialogues.map((d, index) => ({ d, index }));
+
+  // ── Filter (by title, NPC name or Quest name) ──
+  const q = dialogueFilter.trim().toLowerCase();
+  if (q) {
+    items = items.filter(({ d }) => {
+      const npc = npcById.get(d.npcId);
+      const quest = questById.get(d.questId);
+      return (
+        (d.title || '').toLowerCase().includes(q) ||
+        (npc?.name || '').toLowerCase().includes(q) ||
+        (quest?.name || '').toLowerCase().includes(q)
+      );
+    });
+    if (items.length === 0) {
+      list.innerHTML = '<li class="empty-state">Sin resultados</li>';
+      return;
+    }
+  }
+
+  const { groupBy } = dialogueView;
+  // Drag-reorder only makes sense on the raw, ungrouped, unfiltered manual list.
+  const canReorder = groupBy === 'none' && dialogueView.sortBy === 'manual' && !q;
+
+  if (groupBy === 'none') {
+    const sorted = sortDialogueItems(items);
+    list.innerHTML = sorted
+      .map(({ d, index }) => dialogueItemHTML(d, index, activeId, npcById, canReorder))
+      .join('');
+    attachListEvents(list, 'dialogue', canReorder);
+    return;
+  }
+
+  // ── Grouped rendering ──
+  const NONE_KEY = '__none__';
+  const groups = new Map();
+  for (const it of items) {
+    let key, label;
+    if (groupBy === 'npc') {
+      const npc = npcById.get(it.d.npcId);
+      key = npc ? npc.id : NONE_KEY;
+      label = npc ? npc.name : 'Sin NPC';
+    } else {
+      const quest = questById.get(it.d.questId);
+      key = quest ? quest.id : NONE_KEY;
+      label = quest ? quest.name : 'Sin Quest';
+    }
+    if (!groups.has(key)) groups.set(key, { label, items: [] });
+    groups.get(key).items.push(it);
+  }
+
+  // Order groups following the sidebar order of NPCs/Quests, with the
+  // "unassigned" bucket last.
+  const orderedKeys = [];
+  const sourceList = groupBy === 'npc' ? npcs : quests;
+  for (const s of sourceList) if (groups.has(s.id)) orderedKeys.push(s.id);
+  if (groups.has(NONE_KEY)) orderedKeys.push(NONE_KEY);
+
+  list.innerHTML = orderedKeys
+    .map((key) => {
+      const g = groups.get(key);
+      const rows = sortDialogueItems(g.items)
+        .map(({ d, index }) => dialogueItemHTML(d, index, activeId, npcById, false))
+        .join('');
       return `
-      <li class="section-list-item ${activeId === d.id ? 'active' : ''}" draggable="true" data-type="dialogue" data-id="${d.id}">
-        <span class="item-drag-handle" title="Arrastrar para reordenar">⠿</span>
-        <span class="item-icon dialogue-icon">D</span>
-        <span class="item-name">${esc(d.title)}${npc ? ` <span style="color:var(--text-muted);font-size:11px">· ${esc(npc.name)}</span>` : ''}</span>
-        <button class="item-delete" data-delete="dialogue" data-id="${d.id}" title="Eliminar">×</button>
-      </li>
-    `;
+      <li class="dialogue-group-header">
+        <span class="dialogue-group-label">${esc(g.label)}</span>
+        <span class="dialogue-group-count">${g.items.length}</span>
+      </li>${rows}`;
     })
     .join('');
 
-  attachListEvents(list, 'dialogue');
+  attachListEvents(list, 'dialogue', false);
 }
 
-function attachListEvents(list, type) {
+function attachListEvents(list, type, enableDnD = true) {
   $$(`.section-list-item[data-type="${type}"]`, list).forEach((item) => {
     const id = item.dataset.id;
 
@@ -162,8 +279,8 @@ function attachListEvents(list, type) {
     });
   });
 
-  // Drag & drop reordering
-  setupDragAndDrop(list, type);
+  // Drag & drop reordering (disabled when grouped/filtered/sorted)
+  if (enableDnD) setupDragAndDrop(list, type);
 }
 
 // ─── DRAG & DROP REORDER ─────────────────────────────
@@ -281,6 +398,9 @@ export function setupAddButtons() {
   // Q9: Collapsible sidebar sections
   setupCollapsibleSections();
 
+  // Dialogue view controls: filter, group by, sort by
+  setupDialogueControls();
+
   $('#btn-add-npc').addEventListener('click', () => {
     showModal(
       'Nuevo NPC',
@@ -347,6 +467,50 @@ export function setupAddButtons() {
       }
     );
   });
+}
+
+// ─── DIALOGUE VIEW CONTROLS ──────────────────────────
+function setupDialogueControls() {
+  const filterInput = $('#dialogue-filter');
+  const clearBtn = $('#dialogue-filter-clear');
+  const groupSel = $('#dialogue-group-by');
+  const sortSel = $('#dialogue-sort-by');
+
+  // Restore persisted preferences into the selects.
+  if (groupSel) groupSel.value = dialogueView.groupBy;
+  if (sortSel) sortSel.value = dialogueView.sortBy;
+
+  if (filterInput) {
+    filterInput.addEventListener('input', () => {
+      dialogueFilter = filterInput.value;
+      renderDialogues();
+    });
+  }
+
+  if (clearBtn && filterInput) {
+    clearBtn.addEventListener('click', () => {
+      dialogueFilter = '';
+      filterInput.value = '';
+      filterInput.focus();
+      renderDialogues();
+    });
+  }
+
+  if (groupSel) {
+    groupSel.addEventListener('change', () => {
+      dialogueView.groupBy = groupSel.value;
+      saveDialogueView();
+      renderDialogues();
+    });
+  }
+
+  if (sortSel) {
+    sortSel.addEventListener('change', () => {
+      dialogueView.sortBy = sortSel.value;
+      saveDialogueView();
+      renderDialogues();
+    });
+  }
 }
 
 // ─── COLLAPSIBLE SECTIONS (Q9) ───────────────────────

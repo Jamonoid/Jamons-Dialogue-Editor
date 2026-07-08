@@ -3,6 +3,7 @@
  * Self-contained module: handles UI, waveform rendering, markers, playback, and export.
  */
 import { encodeWAV } from './wav-encoder.js';
+import { esc } from '../utils/helpers.js';
 
 // ─── STATE ───────────────────────────────────────────
 let audioBuffer = null;
@@ -19,6 +20,7 @@ let playheadTime = 0;   // Playback start position (set by Shift+Click)
 let zoom = 1;           // 1 = fit entire audio, higher = more zoomed in
 let scrollX = 0;        // Horizontal scroll offset in pixels
 let fileName = '';
+let exportPrefix = '';  // Prepended to each exported clip's name (user-editable)
 
 // Canvas refs
 let waveCanvas = null;
@@ -83,6 +85,15 @@ export function init() {
 
   // Clear button
   overlay.querySelector('#slicer-clear')?.addEventListener('click', clearAudio);
+
+  // Export prefix input
+  const prefixInput = overlay.querySelector('#slicer-export-prefix');
+  if (prefixInput) {
+    prefixInput.addEventListener('input', () => {
+      exportPrefix = prefixInput.value;
+      renderSegmentList(); // update the filename previews
+    });
+  }
 
   // Canvas setup
   waveCanvas = overlay.querySelector('#slicer-waveform');
@@ -150,6 +161,11 @@ async function loadAudioFile(file) {
     zoom = 1;
     scrollX = 0;
 
+    // Default export prefix derived from the file name (e.g. "recording_").
+    exportPrefix = fileName ? `${fileName}_` : '';
+    const prefixInput = overlay.querySelector('#slicer-export-prefix');
+    if (prefixInput) prefixInput.value = exportPrefix;
+
     // Update UI
     if (dropZone) dropZone.classList.add('hidden');
     if (workspace) workspace.classList.remove('hidden');
@@ -184,10 +200,13 @@ function clearAudio() {
   markers = [];
   zoom = 1;
   scrollX = 0;
+  exportPrefix = '';
 
   const overlay = document.getElementById('audio-slicer-overlay');
   const dropZone = overlay.querySelector('.slicer-drop-zone');
   const workspace = overlay.querySelector('.slicer-workspace');
+  const prefixInput = overlay.querySelector('#slicer-export-prefix');
+  if (prefixInput) prefixInput.value = '';
 
   if (workspace) workspace.classList.add('hidden');
   if (dropZone) {
@@ -678,8 +697,9 @@ function renderSegmentList() {
       index: i,
       start: allTimes[i],
       end: allTimes[i + 1],
-      // Default base name (no numeric prefix — that's added on export)
-      baseName: `${fileName}_${String(i + 1).padStart(2, '0')}`,
+      // Default base name is just the sequential number; the export prefix
+      // is prepended at export time.
+      baseName: String(i + 1).padStart(2, '0'),
     });
   }
 
@@ -688,10 +708,15 @@ function renderSegmentList() {
     return;
   }
 
+  const prefixHtml = exportPrefix
+    ? `<span class="slicer-seg-prefix" title="Prefijo (edítalo en la barra de exportación)">${esc(exportPrefix)}</span>`
+    : '';
+
   list.innerHTML = segments.map((seg) => `
     <div class="slicer-segment" data-index="${seg.index}">
       <span class="slicer-seg-num">${seg.index + 1}</span>
-      <input class="slicer-seg-name" type="text" value="${seg.baseName}" data-index="${seg.index}" spellcheck="false" placeholder="nombre_segmento">
+      ${prefixHtml}
+      <input class="slicer-seg-name" type="text" value="${esc(seg.baseName)}" data-index="${seg.index}" spellcheck="false" placeholder="nombre_segmento">
       <button class="slicer-seg-play" data-start="${seg.start}" data-end="${seg.end}" title="Reproducir segmento">
         <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       </button>
@@ -718,16 +743,26 @@ function getSegments() {
 
   for (let i = 0; i < allTimes.length - 1; i++) {
     const nameInput = list?.querySelector(`.slicer-seg-name[data-index="${i}"]`);
-    const baseName = nameInput?.value.trim() || `${fileName}_${String(i + 1).padStart(2, '0')}`;
+    const baseName = nameInput?.value.trim() || String(i + 1).padStart(2, '0');
+    // Final filename: prefix + per-segment name (e.g. "dialogo_01").
+    const name = sanitizeFileName(`${exportPrefix}${baseName}`) || String(i + 1).padStart(2, '0');
     segments.push({
       index: i,
       start: allTimes[i],
       end: allTimes[i + 1],
-      // Final filename: 01_basename, 02_basename, etc.
-      name: `${String(i + 1).padStart(2, '0')}_${baseName}`,
+      name,
     });
   }
   return segments;
+}
+
+/** Strips characters that are invalid in file names across OSes. */
+function sanitizeFileName(name) {
+  return name
+    .replace(/[\\/:*?"<>|]/g, '_') // illegal on Windows
+    .replace(/\s+/g, '_')          // collapse whitespace
+    .replace(/_+/g, '_')           // collapse repeated underscores
+    .replace(/^[_.]+|[_.]+$/g, ''); // trim leading/trailing _ or .
 }
 
 // ─── EXPORT ──────────────────────────────────────────

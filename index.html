@@ -205,6 +205,40 @@
               +
             </button>
           </div>
+          <div class="dialogue-controls" id="dialogue-controls">
+            <div class="dialogue-filter-wrap">
+              <svg class="dialogue-filter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="7" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                type="text"
+                id="dialogue-filter"
+                class="dialogue-filter-input"
+                placeholder="Filtrar diálogos..."
+                autocomplete="off"
+              />
+              <button class="dialogue-filter-clear" id="dialogue-filter-clear" title="Limpiar" style="display: none">×</button>
+            </div>
+            <div class="dialogue-controls-row">
+              <label class="dialogue-control">
+                <span class="dialogue-control-label">Agrupar</span>
+                <select id="dialogue-group-by" class="dialogue-select" title="Agrupar diálogos">
+                  <option value="none">Sin agrupar</option>
+                  <option value="npc">Por NPC</option>
+                  <option value="quest">Por Quest</option>
+                </select>
+              </label>
+              <label class="dialogue-control">
+                <span class="dialogue-control-label">Ordenar</span>
+                <select id="dialogue-sort-by" class="dialogue-select" title="Ordenar diálogos">
+                  <option value="manual">Manual</option>
+                  <option value="title-asc">Título A→Z</option>
+                  <option value="title-desc">Título Z→A</option>
+                </select>
+              </label>
+            </div>
+          </div>
           <ul class="section-list" id="dialogue-list"></ul>
         </div>
       </aside>
@@ -381,6 +415,18 @@
         </div>
 
         <div class="slicer-export-bar">
+          <label class="slicer-prefix-field" title="Se antepone al número de cada archivo exportado">
+            <span class="slicer-prefix-label">Prefijo</span>
+            <input
+              type="text"
+              id="slicer-export-prefix"
+              class="slicer-prefix-input"
+              placeholder="Ej: dialogo_"
+              spellcheck="false"
+              autocomplete="off"
+            />
+          </label>
+          <div class="slicer-export-spacer"></div>
           <button class="btn btn-primary" id="slicer-export-zip">📦 Exportar todo (.zip)</button>
           <button class="btn" id="slicer-export-single">📁 Exportar individuales</button>
         </div>

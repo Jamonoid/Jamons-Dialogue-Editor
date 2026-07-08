@@ -12,4 +12,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Audio export
   pickAudioFolder: () => ipcRenderer.invoke('audio:pick-folder'),
   writeAudioFiles: (folderPath, files) => ipcRenderer.invoke('audio:write-files', { folderPath, files }),
+
+  // Claude Code (local subscription-based AI provider)
+  claudeCall: (payload) => ipcRenderer.invoke('ai:claude-call', payload),
+  claudeCheck: () => ipcRenderer.invoke('ai:claude-check'),
 });

@@ -13,6 +13,7 @@ import { initLangToggle } from './modules/lang.js';
 import { hideContextMenu, showAISettingsModal, showAIGenerateModal, showAILoading, hideAILoading, toast } from './modules/ui.js';
 import * as AI from './modules/ai.js';
 import * as Chat from './modules/chat.js';
+import * as McpBridge from './modules/mcp-bridge.js';
 import * as AudioSlicer from './modules/audio-slicer.js';
 
 // ─── RENDER ALL ──────────────────────────────────────
@@ -228,6 +229,9 @@ function init() {
 
   // Initialize AI chat assistant
   Chat.setup(renderAll, Canvas.autoLayout);
+
+  // MCP bridge: lets Claude Code (via electron/mcp-server.js) drive the app
+  McpBridge.setup(Canvas.autoLayout);
 }
 
 init();

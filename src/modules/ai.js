@@ -1,5 +1,7 @@
 /**
- * AI module — OpenRouter API integration for translation and dialogue generation.
+ * AI module — multi-provider AI integration for translation and dialogue generation.
+ * Providers: OpenRouter (HTTP API) and Claude Code (local CLI via Electron IPC,
+ * uses the user's Claude Pro/Max subscription). Provider is selectable per task.
  * Supports thinking models and PDF context.
  */
 import { toast } from './ui.js';
@@ -25,6 +27,9 @@ let config = {
   modelGenerate: '',   // For dialogue generation & extension
   modelTranslate: '',  // For ES → EN translation
   modelChat: '',       // For the integrated chat assistant
+  providerGenerate: 'openrouter',   // 'openrouter' | 'claude'
+  providerTranslate: 'openrouter',
+  providerChat: 'openrouter',
   temperature: 0.7,
   isThinking: false,
   contextFiles: [],  // [{name, text}]
@@ -100,7 +105,7 @@ async function callOpenRouter(messages, options = {}) {
         userMsg = 'Acceso denegado. Verifica los permisos de tu API Key.';
         break;
       case 404:
-        userMsg = `Modelo "${config.model}" no encontrado. Verifica el ID del modelo.`;
+        userMsg = `Modelo "${model}" no encontrado. Verifica el ID del modelo.`;
         break;
       case 429:
         userMsg = 'Demasiadas solicitudes. Espera un momento e intenta de nuevo.';
@@ -130,6 +135,69 @@ function stripThinking(text) {
   return text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').trim();
 }
 
+// ─── CLAUDE CODE (Electron IPC) ──────────────────────
+async function callClaudeCode(messages, options = {}) {
+  const api = typeof window !== 'undefined' ? window.electronAPI : null;
+  if (!api || !api.claudeCall) {
+    throw new Error('Claude Code solo está disponible en la app de escritorio (Electron).');
+  }
+
+  // Split system messages from the conversation
+  const systemParts = [];
+  const convo = [];
+  for (const m of messages) {
+    if (m.role === 'system') systemParts.push(m.content);
+    else convo.push(m);
+  }
+
+  // Claude Code takes a single prompt — flatten multi-turn history
+  let prompt;
+  if (convo.length === 1 && convo[0].role === 'user') {
+    prompt = convo[0].content;
+  } else {
+    prompt = convo
+      .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
+      .join('\n\n');
+  }
+
+  const res = await api.claudeCall({
+    prompt,
+    systemPrompt: systemParts.join('\n\n') || null,
+    model: options.model || 'sonnet',
+    maxTokens: options.maxTokens || null,
+  });
+
+  if (!res || !res.ok) {
+    throw new Error(res?.error || 'Error desconocido al llamar a Claude Code.');
+  }
+
+  let content = res.text || '';
+  if (config.isThinking) content = stripThinking(content);
+  return content.trim();
+}
+
+// ─── PROVIDER DISPATCHER ─────────────────────────────
+const TASK_FIELDS = {
+  generate: { provider: 'providerGenerate', model: 'modelGenerate' },
+  translate: { provider: 'providerTranslate', model: 'modelTranslate' },
+  chat: { provider: 'providerChat', model: 'modelChat' },
+};
+
+/**
+ * Routes an AI call to the provider configured for the given task.
+ * options.task: 'generate' | 'translate' | 'chat' (default 'generate')
+ */
+async function callProvider(messages, options = {}) {
+  const fields = TASK_FIELDS[options.task] || TASK_FIELDS.generate;
+  const provider = config[fields.provider] || 'openrouter';
+  const model = options.model || config[fields.model];
+
+  if (provider === 'claude') {
+    return callClaudeCode(messages, { ...options, model });
+  }
+  return callOpenRouter(messages, { ...options, model });
+}
+
 // ─── TRANSLATION (ES → EN) ─────────────────────────
 export async function translateNode(nodeId) {
   const dlg = State.getActiveDialogue();
@@ -147,7 +215,7 @@ export async function translateNode(nodeId) {
     { role: 'user', content: sourceText }
   ];
 
-  const translated = await callOpenRouter(messages, { model: config.modelTranslate });
+  const translated = await callProvider(messages, { task: 'translate' });
   const updatedText = { ...node.text };
   updatedText.en = translated;
   State.updateNodeText(nodeId, updatedText);
@@ -175,7 +243,7 @@ export async function translateAllNodes() {
     { role: 'user', content: texts }
   ];
 
-  const result = await callOpenRouter(messages, { model: config.modelTranslate, maxTokens: 4096 });
+  const result = await callProvider(messages, { task: 'translate', maxTokens: 4096 });
 
   // Parse results
   const parts = result.split('---').map((p) => p.trim());
@@ -252,7 +320,7 @@ export async function generateDialogue(prompt, npcName, { minNodes = 5, maxNodes
   ];
 
   const dynamicMaxTokens = Math.min(16384, Math.max(4096, maxNodes * 350));
-  const result = await callOpenRouter(messages, { model: config.modelGenerate, temperature: 0.8, maxTokens: dynamicMaxTokens });
+  const result = await callProvider(messages, { task: 'generate', temperature: 0.8, maxTokens: dynamicMaxTokens });
 
   return parseAIResponse(result);
 }
@@ -288,7 +356,7 @@ export async function extendDialogue(prompt, npcName, { minNodes = 5, maxNodes =
   ];
 
   const dynamicMaxTokens = Math.min(16384, Math.max(4096, maxNodes * 350));
-  const result = await callOpenRouter(messages, { model: config.modelGenerate, temperature: 0.8, maxTokens: dynamicMaxTokens });
+  const result = await callProvider(messages, { task: 'generate', temperature: 0.8, maxTokens: dynamicMaxTokens });
   return parseAIResponse(result);
 }
 
@@ -517,9 +585,10 @@ loadConfig();
 
 /**
  * Public API wrapper — used by the Chat module to call the AI
- * without re-implementing auth logic.
+ * without re-implementing auth logic. Defaults to the 'chat' task
+ * so the per-task provider config applies.
  */
 export async function callAI(messages, options = {}) {
-  return callOpenRouter(messages, options);
+  return callProvider(messages, { task: 'chat', ...options });
 }
 
