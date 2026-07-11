@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dialogue Forge</title>
+    <title>Jamon's Dialogue Editor</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -35,7 +35,7 @@
               </linearGradient>
             </defs>
           </svg>
-          Dialogue Forge
+          Jamon's Dialogue Editor
         </div>
 
         <div class="toolbar-divider"></div>
@@ -141,6 +141,20 @@
               <line x1="8.12" y1="8.12" x2="12" y2="12"/>
             </svg>
             Audio Slicer
+          </button>
+          <button class="toolbar-btn ai-btn" id="btn-memory-map" title="Memoria vectorial — mapa neuronal del proyecto">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="5" cy="7" r="2.5"/>
+              <circle cx="19" cy="5" r="2.5"/>
+              <circle cx="12" cy="14" r="2.5"/>
+              <circle cx="5" cy="19" r="2.5"/>
+              <circle cx="19" cy="19" r="2.5"/>
+              <line x1="7" y1="8" x2="10" y2="12.5"/>
+              <line x1="17.2" y1="6.4" x2="13.8" y2="12.4"/>
+              <line x1="6.8" y1="17.6" x2="10.2" y2="15.6"/>
+              <line x1="17.2" y1="17.8" x2="14" y2="15.4"/>
+            </svg>
+            Memoria
           </button>
         </div>
 
@@ -336,6 +350,7 @@
             <div class="chat-subtitle" id="chat-context-label">Sin diálogo activo</div>
           </div>
         </div>
+        <button class="chat-minimize-btn" id="chat-clear-memory" title="Borrar historial y memoria del chat">🗑</button>
         <button class="chat-minimize-btn" id="chat-minimize" title="Cerrar">×</button>
       </div>
       <div class="chat-messages" id="chat-messages"></div>
@@ -415,20 +430,79 @@
         </div>
 
         <div class="slicer-export-bar">
-          <label class="slicer-prefix-field" title="Se antepone al número de cada archivo exportado">
-            <span class="slicer-prefix-label">Prefijo</span>
+          <label class="slicer-prefix-field" title="Patrón de nombre para todos los segmentos. Tokens: {file} = nombre del audio, {num} = número (01, 02...), {num3} = número (001, 002...)">
+            <span class="slicer-prefix-label">Patrón</span>
             <input
               type="text"
-              id="slicer-export-prefix"
+              id="slicer-name-pattern"
               class="slicer-prefix-input"
-              placeholder="Ej: dialogo_"
+              placeholder="{file}_{num}"
               spellcheck="false"
               autocomplete="off"
             />
           </label>
+          <button class="btn btn-sm" id="slicer-apply-pattern" title="Vuelve a aplicar el patrón a TODOS los segmentos (descarta los nombres editados a mano)">↻ Aplicar a todos</button>
+          <span class="slicer-batch-divider"></span>
+          <label class="slicer-prefix-field" title="Buscar este texto en los nombres">
+            <span class="slicer-prefix-label">Buscar</span>
+            <input type="text" id="slicer-rename-find" class="slicer-prefix-input slicer-input-sm" spellcheck="false" autocomplete="off" />
+          </label>
+          <label class="slicer-prefix-field" title="Reemplazar por este texto">
+            <span class="slicer-prefix-label">→</span>
+            <input type="text" id="slicer-rename-replace" class="slicer-prefix-input slicer-input-sm" spellcheck="false" autocomplete="off" />
+          </label>
+          <button class="btn btn-sm" id="slicer-rename-apply" title="Buscar y reemplazar en los nombres de todos los segmentos">Reemplazar</button>
           <div class="slicer-export-spacer"></div>
           <button class="btn btn-primary" id="slicer-export-zip">📦 Exportar todo (.zip)</button>
           <button class="btn" id="slicer-export-single">📁 Exportar individuales</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MEMORY MAP OVERLAY (neural map of the vector memory) -->
+    <div id="memory-map-overlay" class="slicer-overlay" tabindex="-1">
+      <div class="slicer-header">
+        <div class="slicer-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+            <circle cx="5" cy="7" r="2.5"/><circle cx="19" cy="5" r="2.5"/><circle cx="12" cy="14" r="2.5"/>
+            <circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/>
+            <line x1="7" y1="8" x2="10" y2="12.5"/><line x1="17.2" y1="6.4" x2="13.8" y2="12.4"/>
+            <line x1="6.8" y1="17.6" x2="10.2" y2="15.6"/><line x1="17.2" y1="17.8" x2="14" y2="15.4"/>
+          </svg>
+          Mapa de Memoria
+        </div>
+        <span id="memmap-stats" class="slicer-file-info"></span>
+        <div class="slicer-header-actions">
+          <button class="btn btn-sm" id="memmap-reindex" title="Reindexar el proyecto (nodos, archivos, NPCs, quests)">⚡ Reindexar</button>
+          <button class="slicer-close" id="memmap-close" title="Cerrar (Esc)">✕</button>
+        </div>
+      </div>
+
+      <div class="memmap-toolbar">
+        <div class="memmap-legend">
+          <span class="memmap-key" data-type="node" title="Mostrar/ocultar"><i style="background:#6c5ce7"></i>Nodos</span>
+          <span class="memmap-key" data-type="file" title="Mostrar/ocultar"><i style="background:#00b894"></i>Archivos</span>
+          <span class="memmap-key" data-type="npc" title="Mostrar/ocultar"><i style="background:#fdcb6e"></i>NPCs</span>
+          <span class="memmap-key" data-type="quest" title="Mostrar/ocultar"><i style="background:#e17055"></i>Quests</span>
+          <span class="memmap-key" data-type="chat" title="Mostrar/ocultar"><i style="background:#74b9ff"></i>Chat</span>
+        </div>
+        <span id="memmap-progress" class="memmap-progress"></span>
+        <label class="memmap-threshold" title="Similitud mínima para dibujar conexiones">
+          Similitud
+          <input type="range" id="memmap-threshold" min="0.5" max="0.95" step="0.05" value="0.75" />
+          <span id="memmap-threshold-value">0.75</span>
+        </label>
+        <span class="memmap-hint">Arrastrar = mover · Rueda = zoom · Doble clic = ajustar · Clic en nodo = ir al nodo</span>
+      </div>
+
+      <div class="memmap-canvas-wrap">
+        <canvas id="memmap-canvas"></canvas>
+        <div id="memmap-tooltip" class="memmap-tooltip"></div>
+        <div id="memmap-empty" class="memmap-empty">
+          <div class="memmap-empty-icon">🧠</div>
+          <h3>La memoria vectorial está vacía</h3>
+          <p>Indexa el proyecto para ver el mapa semántico de nodos, archivos de contexto, NPCs, quests e historial del chat.<br>El modelo de embeddings corre 100% local (primera vez descarga ~50 MB).</p>
+          <button class="btn btn-primary" id="memmap-index-now">⚡ Indexar proyecto</button>
         </div>
       </div>
     </div>

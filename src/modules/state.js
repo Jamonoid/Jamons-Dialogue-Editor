@@ -667,7 +667,7 @@ function updateStatus() {
   }
   // Update window title
   if (window.electronAPI?.setTitle) {
-    const base = 'Dialogue Forge';
+    const base = "Jamon's Dialogue Editor";
     const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : null;
     window.electronAPI.setTitle(fileName ? `${base} — ${fileName}${dirty ? ' •' : ''}` : base);
   }

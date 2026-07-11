@@ -207,8 +207,24 @@ export function showAISettingsModal(config, onSave) {
     { key: 'translate', label: 'Traducción', orPlaceholder: 'google/gemini-2.5-flash', orHint: 'Usado para traducir ES → EN. Un modelo rápido y barato funciona bien.' },
     { key: 'chat', label: 'Chat Asistente', orPlaceholder: 'google/gemini-2.5-flash', orHint: 'Usado para el chat integrado de IA.' },
   ];
-  const CLAUDE_HINT = 'Usa tu suscripción de Claude (CLI de Claude Code instalado y logueado). Alias: sonnet, opus, haiku.';
+  const CLAUDE_HINT = 'Usa tu suscripción de Claude (CLI de Claude Code instalado y logueado). Elige un alias de la lista o escribe otro.';
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+  // Model suggestions per provider (free text still allowed — these feed <datalist>)
+  const OR_MODELS = [
+    'anthropic/claude-sonnet-4', 'anthropic/claude-opus-4',
+    'google/gemini-2.5-flash', 'google/gemini-2.5-pro',
+    'openai/gpt-4o-mini', 'openai/gpt-4o',
+    'deepseek/deepseek-chat', 'meta-llama/llama-3.3-70b-instruct',
+  ];
+  const CLAUDE_MODELS = ['sonnet', 'opus', 'haiku'];
+  const EMB_MODELS = [
+    'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+    'Xenova/multilingual-e5-small',
+    'Xenova/all-MiniLM-L6-v2',
+  ];
+  const datalist = (id, values) =>
+    `<datalist id="${id}">${values.map((v) => `<option value="${v}"></option>`).join('')}</datalist>`;
 
   const taskRowsHTML = TASK_ROWS.map((t) => {
     const provider = config[`provider${cap(t.key)}`] || 'openrouter';
@@ -222,7 +238,7 @@ export function showAISettingsModal(config, onSave) {
             <option value="claude" ${isClaude ? 'selected' : ''}>Claude Code</option>
           </select>
           <input class="field-input" type="text" id="ai-model-${t.key}" value="${config[`model${cap(t.key)}`] || ''}"
-            placeholder="${isClaude ? 'sonnet' : t.orPlaceholder}" style="flex:1">
+            placeholder="${isClaude ? 'sonnet' : t.orPlaceholder}" list="${isClaude ? 'dl-claude-models' : 'dl-or-models'}" style="flex:1">
         </div>
         <span class="field-hint" id="ai-hint-${t.key}">${isClaude ? CLAUDE_HINT : t.orHint}</span>
       </div>`;
@@ -231,7 +247,19 @@ export function showAISettingsModal(config, onSave) {
   modal.innerHTML = `
     <div class="modal-header"><h3>⚙ Configuración de IA</h3></div>
     <div class="modal-body ai-settings-body">
+      ${datalist('dl-or-models', OR_MODELS)}
+      ${datalist('dl-claude-models', CLAUDE_MODELS)}
+      ${datalist('dl-emb-models', EMB_MODELS)}
+
       <div class="field-group">
+        <div class="field-row" style="gap:8px; align-items:center">
+          <span class="field-hint" style="margin:0">Usar el mismo proveedor en todo:</span>
+          <button class="btn btn-sm" id="ai-all-openrouter" type="button">OpenRouter</button>
+          <button class="btn btn-sm" id="ai-all-claude" type="button">Claude Code</button>
+        </div>
+      </div>
+
+      <div class="field-group" id="ai-key-group">
         <label class="field-label">API Key de OpenRouter</label>
         <input class="field-input" type="password" id="ai-api-key" value="${config.apiKey || ''}" placeholder="sk-or-v1-...">
         <span class="field-hint">Obtén tu key en <a href="https://openrouter.ai/keys" target="_blank" style="color:var(--accent-primary)">openrouter.ai/keys</a>. Solo se usa con el proveedor OpenRouter.</span>
@@ -254,8 +282,21 @@ export function showAISettingsModal(config, onSave) {
       </div>
 
       <div class="field-group">
+        <label class="field-label">Memoria vectorial (embeddings locales)</label>
+        <div class="field-row" style="gap:10px; align-items:center">
+          <label class="toggle-switch" title="Activa la memoria semántica del proyecto (RAG para el chat + mapa neuronal)">
+            <input type="checkbox" id="ai-embeddings-enabled" ${config.embeddingsEnabled !== false ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+          <input class="field-input" type="text" id="ai-embeddings-model" value="${config.embeddingsModel || ''}"
+            placeholder="Xenova/paraphrase-multilingual-MiniLM-L12-v2" list="dl-emb-models" style="flex:1">
+        </div>
+        <span class="field-hint">Modelo local que corre 100% en tu PC (se descarga una vez, ~50 MB; Claude no genera embeddings). Indexa nodos, archivos, NPCs y chat — visualízalo con el botón 🧠 Memoria de la barra.</span>
+      </div>
+
+      <div class="field-group">
         <label class="field-label">Archivos de contexto del mundo (.pdf, .md, .txt)</label>
-        <span class="field-hint" style="margin-bottom:6px">Lore, personajes, mundo — se envían a la IA al generar diálogos</span>
+        <span class="field-hint" style="margin-bottom:6px">Lore, personajes, mundo — se envían a la IA al generar diálogos y se indexan en la memoria vectorial</span>
         <div id="ai-files-list" class="ai-files-list"></div>
         <div class="file-upload-area">
           <input type="file" id="ai-context-file" accept=".pdf,.md,.txt" style="display:none">
@@ -264,6 +305,7 @@ export function showAISettingsModal(config, onSave) {
       </div>
     </div>
     <div class="modal-footer">
+      <button class="btn" id="ai-test-btn" style="margin-right:auto" title="Verifica la API key de OpenRouter y/o el CLI de Claude Code según los proveedores elegidos">🔌 Probar conexión</button>
       <button class="btn" id="modal-cancel">Cancelar</button>
       <button class="btn btn-primary" id="modal-confirm">Guardar</button>
     </div>
@@ -271,14 +313,84 @@ export function showAISettingsModal(config, onSave) {
 
   overlay.classList.add('active');
 
-  // Provider selects: update model placeholder + hint when switching provider
-  TASK_ROWS.forEach((t) => {
+  // Hide the API key field when no task uses OpenRouter
+  const syncKeyVisibility = () => {
+    const anyOpenRouter = TASK_ROWS.some((t) => $(`#ai-provider-${t.key}`).value === 'openrouter');
+    const keyGroup = $('#ai-key-group');
+    if (keyGroup) keyGroup.style.display = anyOpenRouter ? '' : 'none';
+  };
+
+  // Provider selects: update model placeholder + hint + suggestions when switching provider
+  const applyProviderUI = (t) => {
     const select = $(`#ai-provider-${t.key}`);
-    select.addEventListener('change', () => {
-      const isClaude = select.value === 'claude';
-      $(`#ai-model-${t.key}`).placeholder = isClaude ? 'sonnet' : t.orPlaceholder;
-      $(`#ai-hint-${t.key}`).textContent = isClaude ? CLAUDE_HINT : t.orHint;
+    const isClaude = select.value === 'claude';
+    const modelInput = $(`#ai-model-${t.key}`);
+    modelInput.placeholder = isClaude ? 'sonnet' : t.orPlaceholder;
+    modelInput.setAttribute('list', isClaude ? 'dl-claude-models' : 'dl-or-models');
+    $(`#ai-hint-${t.key}`).textContent = isClaude ? CLAUDE_HINT : t.orHint;
+  };
+  TASK_ROWS.forEach((t) => {
+    $(`#ai-provider-${t.key}`).addEventListener('change', () => {
+      applyProviderUI(t);
+      syncKeyVisibility();
     });
+  });
+  syncKeyVisibility();
+
+  // "Same provider everywhere" shortcuts
+  const setAllProviders = (value) => {
+    TASK_ROWS.forEach((t) => {
+      $(`#ai-provider-${t.key}`).value = value;
+      applyProviderUI(t);
+    });
+    syncKeyVisibility();
+  };
+  $('#ai-all-openrouter')?.addEventListener('click', () => setAllProviders('openrouter'));
+  $('#ai-all-claude')?.addEventListener('click', () => setAllProviders('claude'));
+
+  // Connection test: checks whichever providers are currently selected
+  $('#ai-test-btn')?.addEventListener('click', async () => {
+    const btn = $('#ai-test-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Probando...';
+    try {
+      const usesOR = TASK_ROWS.some((t) => $(`#ai-provider-${t.key}`).value === 'openrouter');
+      const usesCl = TASK_ROWS.some((t) => $(`#ai-provider-${t.key}`).value === 'claude');
+
+      if (usesOR) {
+        const key = $('#ai-api-key').value.trim();
+        if (!key) {
+          toast('OpenRouter: falta la API key.', 'error');
+        } else {
+          try {
+            const res = await fetch('https://openrouter.ai/api/v1/key', {
+              headers: { 'Authorization': `Bearer ${key}` },
+            });
+            if (res.ok) toast('OpenRouter: API key válida ✓', 'success');
+            else if (res.status === 401) toast('OpenRouter: API key inválida o expirada.', 'error');
+            else toast(`OpenRouter respondió ${res.status}.`, 'error');
+          } catch {
+            toast('OpenRouter: sin conexión a internet.', 'error');
+          }
+        }
+      }
+
+      if (usesCl) {
+        const api = window.electronAPI;
+        if (!api || !api.claudeCheck) {
+          toast('Claude Code solo funciona en la app de escritorio (Electron).', 'error');
+        } else {
+          const res = await api.claudeCheck().catch(() => null);
+          if (res?.ok) toast(`Claude Code disponible ✓ (${res.version || 'CLI detectado'})`, 'success');
+          else toast(res?.error || 'Claude Code no está disponible.', 'error');
+        }
+      }
+
+      if (!usesOR && !usesCl) toast('Selecciona al menos un proveedor.', 'info');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔌 Probar conexión';
+    }
   });
 
   // Temperature slider live update
@@ -353,6 +465,8 @@ export function showAISettingsModal(config, onSave) {
       temperature: parseFloat($('#ai-temperature').value),
       isThinking: $('#ai-thinking').checked,
       contextFiles: contextFiles,
+      embeddingsEnabled: $('#ai-embeddings-enabled').checked,
+      embeddingsModel: $('#ai-embeddings-model').value.trim(),
     });
     close();
     toast('Configuración de IA guardada', 'success');

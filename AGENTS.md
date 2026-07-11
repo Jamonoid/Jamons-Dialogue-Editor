@@ -1,8 +1,8 @@
-# Dialogue Forge — AI Agent Guide
+# Jamon's Dialogue Editor — AI Agent Guide
 
 ## Project Overview
 
-**Dialogue Forge** is a standalone desktop application (Electron + Vite) for creating branched dialogue trees for games.
+**Jamon's Dialogue Editor** (formerly *Dialogue Forge*; internal identifiers like localStorage keys, the npm package name and the MCP server name keep the old `dialogue-forge`/`dialogueForge` naming for backwards compatibility) is a standalone desktop application (Electron + Vite) for creating branched dialogue trees for games.
 
 ## Tech Stack
 
@@ -16,6 +16,8 @@
 | **JSON** | Export/import format |
 | **OpenRouter API** | AI translation & dialogue generation (HTTP, per-token) |
 | **Claude Code CLI** | Alternative AI provider using the local Claude subscription (no API key) |
+| **transformers.js** (`@huggingface/transformers`) | Local embeddings for the vector memory / RAG — runs on-device, no API key (Claude cannot generate embeddings) |
+| **IndexedDB** | Vector store for the semantic memory (outside project state / undo) |
 | **MCP (Model Context Protocol)** | Embedded server so external Claude Code / CLI can drive the app |
 
 ## Architecture
@@ -38,7 +40,9 @@ src/
     ui.js          → Modals, toasts, context menus, confirmDelete, AI settings/generate modals
     lang.js        → Language toggle (ES/EN)
     ai.js          → Multi-provider AI: OpenRouter (HTTP) + Claude Code (local CLI via IPC); per-task dispatcher, translation, generation, PDF/MD parsing
-    chat.js        → Integrated AI chat assistant: floating panel, action executor, project context builder
+    chat.js        → Integrated AI chat assistant: floating panel, action executor, project context builder, RAG retrieval
+    vector-memory.js → Local semantic memory: transformers.js embeddings (lazy-loaded), IndexedDB store, incremental indexing, top-k cosine search, chat memory
+    memory-map.js  → "Neural map" overlay: PCA 2D projection of the vector memory on a DPR-aware canvas (pan/zoom, similarity links, click-to-navigate)
     mcp-bridge.js  → Renderer-side executor for MCP tools (window.__mcpExecute); runs edits against live State
     prompts.js     → Centralized AI prompt templates (translation, generation, extension, chat)
   utils/
@@ -169,9 +173,20 @@ Translation prompts explicitly instruct the AI to preserve profanity, slang, and
   temperature: number,         // Default 0.7 (OpenRouter only)
   isThinking: boolean,         // Strip <thinking> blocks from response
   contextFiles: [{name, text}],  // Multiple PDF/MD/TXT files for context
-  contextPrompt: string        // Global context prompt
+  contextPrompt: string,       // Global context prompt
+  embeddingsEnabled: boolean,  // Vector memory on/off (default true)
+  embeddingsModel: string      // transformers.js model id; empty = Xenova/paraphrase-multilingual-MiniLM-L12-v2
 }
 ```
+
+The AI settings modal (`ui.js`) shows: "same provider everywhere" shortcuts, `<datalist>` model suggestions per provider, the OpenRouter key field only when some task uses OpenRouter, a "🔌 Probar conexión" button (OpenRouter `/api/v1/key` check + `ai:claude-check` IPC), and the embeddings toggle/model field.
+
+### Vector Memory (RAG) & Neural Map
+
+- `vector-memory.js` embeds **dialogue nodes, context files (chunked ~800 chars), NPCs, quests and chat exchanges** with a local transformers.js model (lazy `import()`, `dtype: 'q8'`, downloads once then cached by the browser). Vectors live in **IndexedDB** (`dialogueForge_vectors`), deliberately outside `state` so the undo system never serializes them.
+- Indexing is **incremental** (djb2 content hash per item; stale project items are pruned; chat items are only managed by `addChatExchange`/`clearChatMemory`, capped at 300). A debounced (45 s) background refresh runs from `renderAll()` **only if an index already exists** — the first index is always an explicit user action (Memory Map → "⚡ Indexar proyecto") so the model download is never a surprise.
+- The chat performs top-k (8) cosine retrieval per message and injects a `Relevant Project Memory` block into the system prompt; when there is no index it falls back to the old full-text dump of context files. Each successful exchange is remembered (fire-and-forget). The 🗑 button in the chat header clears history + chat vectors.
+- `memory-map.js` ("🧠 Memoria" toolbar button) renders the vectors on a full-screen canvas overlay: PCA via covariance-free power iteration, kNN similarity links (threshold slider; skipped above 600 items, hover-only links instead), legend toggles per type, cursor-anchored wheel zoom (math copied from `canvas.js`), tooltips, and click-to-navigate on node points (`setActiveDialogueId` + `setSelectedNodeId` + `notifyChange`).
 Legacy configs with a single `model` field are auto-migrated to all three on first load. Missing `provider*` fields default to `'openrouter'`. The settings modal (`ui.js`) shows a provider dropdown next to each per-task model input; the model field placeholder/hint switches between OpenRouter model IDs and Claude aliases based on the selected provider.
 
 #### Translation (ES → EN only)
@@ -198,6 +213,7 @@ Self-contained tool for splitting dialogue recordings into individual audio clip
 - **Zoom/Scroll**: Ctrl+Wheel = zoom, Wheel = horizontal scroll
 - **Playback**: `AudioBufferSourceNode` for segment previews. Animated cursor via `requestAnimationFrame`
 - **Segments list**: Editable names, play buttons, time ranges
+- **Naming**: pattern-based (`{file}`, `{num}` = 01, `{num3}` = 001; default `{file}_{num}`). Manual per-segment overrides persist in `customNames[]` across list re-renders (marker edits no longer lose typed names). Batch tools: "↻ Aplicar a todos" (reset to pattern) and find/replace across all names. Export dedupes duplicate filenames automatically.
 - **Export**: `wav-encoder.js` for pure JS WAV encoding (44-byte header + Int16 PCM). JSZip (lazy-imported) for .zip bundle export
 - **State**: Fully self-contained (no interaction with dialogue State module)
 

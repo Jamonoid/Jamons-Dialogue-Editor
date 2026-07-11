@@ -5,7 +5,9 @@
 import { $, esc } from '../utils/helpers.js';
 import * as State from './state.js';
 import * as AI from './ai.js';
+import * as VectorMemory from './vector-memory.js';
 import { buildChatSystemPrompt } from './prompts.js';
+import { toast, confirmDelete } from './ui.js';
 
 // ─── MODULE STATE ─────────────────────────────────────
 let chatHistory = []; // [{role, content, actionSummary}]
@@ -40,10 +42,13 @@ function buildProjectContext() {
         .join(', ');
       const flags = [
         n.id === dlg.startNodeId ? '[START]' : '',
-        n.condition ? `[IF:${n.condition.slice(0, 30)}]` : '',
-        n.action ? `[DO:${n.action.slice(0, 30)}]` : '',
+        n.condition ? `[IF:${n.condition.slice(0, 60)}]` : '',
+        n.action ? `[DO:${n.action.slice(0, 60)}]` : '',
       ].filter(Boolean).join(' ');
-      return `    [ID:${n.id}] NPC:"${npc?.name || '-'}" ES:"${(n.text?.es || '').slice(0, 70)}" EN:"${(n.text?.en || '').slice(0, 70)}" → [${conns || 'no outgoing'}] ${flags}`;
+      // Scale per-node text budget down as the dialogue grows so the LLM sees
+      // full lines on normal dialogues without blowing up on huge ones.
+      const textBudget = dlg.nodes.length > 60 ? 90 : dlg.nodes.length > 25 ? 160 : 300;
+      return `    [ID:${n.id}] NPC:"${npc?.name || '-'}" ES:"${(n.text?.es || '').slice(0, textBudget)}" EN:"${(n.text?.en || '').slice(0, textBudget)}" → [${conns || 'no outgoing'}] ${flags}`;
     }).join('\n');
 
     activeDlgText = `  Title:"${dlg.title}" [ID:${dlg.id}]
@@ -237,29 +242,46 @@ function executeActions(actions) {
 }
 
 // ─── PARSE AI RESPONSE ───────────────────────────────
+/**
+ * Extracts the first balanced top-level JSON object from a string.
+ * String-aware (ignores braces inside string literals), so prose before or
+ * after the JSON — common with the Claude Code provider — doesn't break it.
+ */
+function extractJSONObject(raw) {
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const source = fence ? fence[1].trim() : raw;
+  const start = source.indexOf('{');
+  if (start === -1) return null;
+
+  let depth = 0, inStr = false, escNext = false;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
+    if (escNext) { escNext = false; continue; }
+    if (ch === '\\') { if (inStr) escNext = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  return source.slice(start); // unbalanced — let JSON.parse fail gracefully
+}
+
 function parseAIResponse(raw) {
-  let jsonStr = raw;
-
-  // Strip markdown code fences
-  const codeMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeMatch) {
-    jsonStr = codeMatch[1].trim();
-  } else {
-    // Try to grab the outermost JSON object
-    const objMatch = raw.match(/\{[\s\S]*\}/);
-    if (objMatch) jsonStr = objMatch[0];
+  const jsonStr = extractJSONObject(raw);
+  if (jsonStr) {
+    try {
+      const parsed = JSON.parse(AI.sanitizeJSON(jsonStr));
+      return {
+        message: typeof parsed.message === 'string' ? parsed.message : raw,
+        actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+      };
+    } catch { /* fall through to graceful degradation */ }
   }
-
-  try {
-    const parsed = JSON.parse(jsonStr);
-    return {
-      message: typeof parsed.message === 'string' ? parsed.message : raw,
-      actions: Array.isArray(parsed.actions) ? parsed.actions : [],
-    };
-  } catch {
-    // Graceful degradation — show the raw text as a plain message
-    return { message: raw, actions: [] };
-  }
+  // Graceful degradation — show the raw text as a plain message
+  return { message: raw, actions: [] };
 }
 
 // ─── UI ──────────────────────────────────────────────
@@ -338,8 +360,9 @@ async function sendMessage() {
 
   try {
     const aiConfig = AI.getConfig();
-    if (!aiConfig.apiKey) {
-      throw new Error('API Key no configurada. Abre "IA Config" en la barra de herramientas para configurarla.');
+    // Only OpenRouter needs an API key — Claude Code uses the local CLI login.
+    if (aiConfig.providerChat !== 'claude' && !aiConfig.apiKey) {
+      throw new Error('API Key no configurada. Abre "IA Config" en la barra de herramientas para configurarla, o cambia el proveedor del chat a Claude Code.');
     }
 
     const systemPrompt = buildChatSystemPrompt(buildProjectContext());
@@ -351,11 +374,29 @@ async function sendMessage() {
     if (aiConfig.contextPrompt && aiConfig.contextPrompt.trim()) {
       worldContextBlock += `\n\n## Global Context (from IA Config)\n${aiConfig.contextPrompt.trim()}`;
     }
-    if (aiConfig.contextFiles && aiConfig.contextFiles.length > 0) {
+
+    // ─── Vector memory retrieval (RAG) ─────────────────
+    // When the project is indexed, inject only the fragments semantically
+    // relevant to this request instead of blind-truncating every file.
+    let usedRag = false;
+    try {
+      if (VectorMemory.isEnabled() && await VectorMemory.hasIndex()) {
+        const hits = await VectorMemory.search(text, { k: 8 });
+        if (hits.length > 0) {
+          const ragText = hits
+            .map(h => `[${h.typeLabel} · sim ${h.score.toFixed(2)}] ${h.text}`)
+            .join('\n---\n');
+          worldContextBlock += `\n\n## Relevant Project Memory (vector retrieval)\nFragments retrieved from the local vector memory because they are semantically relevant to the user's request:\n${ragText}`;
+          usedRag = true;
+        }
+      }
+    } catch { /* vector memory unavailable — fall back to the full dump below */ }
+
+    if (!usedRag && aiConfig.contextFiles && aiConfig.contextFiles.length > 0) {
       const filesText = aiConfig.contextFiles
         .map(f => `--- ${f.name} ---\n${f.text}`)
         .join('\n\n');
-      worldContextBlock += `\n\n## World Context Documents\n${filesText.slice(0, 8000)}`;
+      worldContextBlock += `\n\n## World Context Documents\n${filesText.slice(0, 12000)}`;
     }
     const fullSystemPrompt = worldContextBlock
       ? systemPrompt + worldContextBlock
@@ -369,7 +410,7 @@ async function sendMessage() {
 
     const raw = await AI.callAI(
       [{ role: 'system', content: fullSystemPrompt }, ...historyForAPI],
-      { model: aiConfig.modelChat, maxTokens: 2048 }
+      { model: aiConfig.modelChat, maxTokens: 8192 }
     );
 
     const { message, actions } = parseAIResponse(raw);
@@ -381,6 +422,9 @@ async function sendMessage() {
     }
 
     chatHistory.push({ role: 'assistant', content: message, actionSummary });
+
+    // Remember this exchange in the vector memory (fire-and-forget)
+    VectorMemory.addChatExchange(text, message).catch(() => {});
 
   } catch (err) {
     chatHistory.push({
@@ -428,6 +472,21 @@ export function setup(renderAll, autoLayout) {
 
   // Panel close/minimize button
   $('#chat-minimize')?.addEventListener('click', closePanel);
+
+  // Clear chat history + vector chat memory
+  $('#chat-clear-memory')?.addEventListener('click', () => {
+    confirmDelete('Se borrará el historial del chat y su memoria vectorial. Los diálogos y archivos indexados no se tocan.', () => {
+      chatHistory = [{
+        role: 'assistant',
+        content: 'Historial y memoria del chat borrados. ¿En qué te ayudo ahora?',
+        actionSummary: [],
+      }];
+      renderMessages();
+      VectorMemory.clearChatMemory()
+        .then(() => toast('Memoria del chat borrada', 'success'))
+        .catch(() => toast('Historial borrado (la memoria vectorial no estaba disponible)', 'info'));
+    });
+  });
 
   // Send button
   $('#chat-send')?.addEventListener('click', sendMessage);

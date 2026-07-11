@@ -6,7 +6,7 @@ import { $ } from '../utils/helpers.js';
 import * as State from './state.js';
 import { normalizeConnection, updateConnectionLabel } from './state.js';
 import { renderNodes, setupNodeInteractions, registerGlobalHandlers } from './nodes.js';
-import { showContextMenu, showModal } from './ui.js';
+import { showContextMenu, showModal, toast } from './ui.js';
 
 // ─── CANVAS STATE ────────────────────────────────────
 export let offset = { x: 0, y: 0 };
@@ -150,7 +150,7 @@ export function renderConnections() {
       const pathD = `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`;
 
       // Invisible fat path for easier clicking + visible thin path
-      paths += `<path d="${pathD}" stroke="transparent" stroke-width="12" fill="none" data-source="${node.id}" data-target="${conn.targetId}" class="conn-hitarea"/>`;
+      paths += `<path d="${pathD}" stroke="transparent" stroke-width="16" fill="none" data-source="${node.id}" data-target="${conn.targetId}" class="conn-hitarea"><title>Doble clic: eliminar · Clic derecho: opciones</title></path>`;
       paths += `<path d="${pathD}" stroke="var(--accent-primary)" stroke-width="2" fill="none" opacity="0.6" class="conn-visible" data-source="${node.id}" data-target="${conn.targetId}"/>`;
     });
   });
@@ -177,6 +177,14 @@ export function renderConnections() {
     path.addEventListener('mouseleave', () => {
       document.querySelectorAll('.dialogue-node.conn-highlighted').forEach((el) => el.classList.remove('conn-highlighted'));
       connectionsGroup.querySelectorAll('.conn-visible').forEach((p) => { p.setAttribute('stroke-width', '2'); p.setAttribute('opacity', '0.6'); });
+    });
+
+    // Double-click on a cable → delete it
+    path.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      State.removeConnection(path.dataset.source, path.dataset.target);
+      toast('Conexión eliminada', 'info');
     });
 
     path.addEventListener('contextmenu', (e) => {
@@ -227,6 +235,7 @@ export function setup() {
   container.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     if (e.target.closest('.dialogue-node') || e.target.closest('.canvas-controls') || e.target.closest('.canvas-add-btn')) return;
+    if (e.target.classList && e.target.classList.contains('conn-hitarea')) return; // clicking a cable shouldn't pan (allows dblclick delete)
 
     if (e.shiftKey) {
       // Shift+drag → selection rectangle

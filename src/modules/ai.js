@@ -33,6 +33,9 @@ let config = {
   temperature: 0.7,
   isThinking: false,
   contextFiles: [],  // [{name, text}]
+  // Local vector memory (transformers.js — runs on-device, no API key)
+  embeddingsEnabled: true,
+  embeddingsModel: '', // empty = default multilingual model (see vector-memory.js)
 };
 
 export function getConfig() { return { ...config, contextFiles: [...(config.contextFiles || [])] }; }
@@ -79,16 +82,31 @@ async function callOpenRouter(messages, options = {}) {
 
   if (options.maxTokens) body.max_tokens = options.maxTokens;
 
-  const response = await fetch(OPENROUTER_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${config.apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://dialogue-forge.app',
-      'X-Title': 'Dialogue Forge',
-    },
-    body: JSON.stringify(body),
-  });
+  // Hard timeout so a hung request never leaves the UI spinning forever
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 180_000);
+
+  let response;
+  try {
+    response = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://dialogue-forge.app',
+        'X-Title': "Jamon's Dialogue Editor",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('OpenRouter no respondió a tiempo (timeout de 3 min). Intenta de nuevo.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
@@ -268,7 +286,7 @@ export async function translateAllNodes() {
 }
 
 // ─── JSON SANITIZER ──────────────────────────────────
-function sanitizeJSON(str) {
+export function sanitizeJSON(str) {
   // Remove trailing commas before ] or }
   str = str.replace(/,\s*([\]}])/g, '$1');
   // Remove BOM and zero-width characters

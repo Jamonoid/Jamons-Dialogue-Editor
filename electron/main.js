@@ -18,7 +18,7 @@ function createWindow() {
     height: 900,
     minWidth: 1000,
     minHeight: 600,
-    title: 'Dialogue Forge',
+    title: "Jamon's Dialogue Editor",
     icon: path.join(__dirname, 'icon.png'),
     backgroundColor: '#0d0f14',
     show: false,
@@ -81,7 +81,7 @@ ipcMain.handle('dialog:open', async () => {
   const result = await dialog.showOpenDialog(win, {
     properties: ['openFile'],
     filters: [
-      { name: 'Dialogue Forge', extensions: ['json'] },
+      { name: "Jamon's Dialogue Editor", extensions: ['json'] },
       { name: 'Todos los archivos', extensions: ['*'] },
     ],
   });
@@ -97,7 +97,7 @@ ipcMain.handle('dialog:save', async (event, { data, filePath }) => {
   if (!filePath) {
     const result = await dialog.showSaveDialog(win, {
       filters: [
-        { name: 'Dialogue Forge', extensions: ['json'] },
+        { name: "Jamon's Dialogue Editor", extensions: ['json'] },
       ],
       defaultPath: 'dialogue_project.json',
     });

@@ -16,7 +16,10 @@ let dragOffset = { x: 0, y: 0 };
 let dragStartPositions = {}; // For multi-drag
 let isDrawing = false;
 let drawFromNodeId = null;
+let drawMode = 'out'; // 'out' = desde conector de salida, 'in' = desde conector de entrada
 let tempLine = null;
+let snapTargetId = null;
+let snapCandidates = []; // conectores válidos como destino (cacheados al iniciar el drag)
 
 // Resize state
 let resizingNodeId = null;
@@ -67,7 +70,7 @@ export function renderNodes(dlg, container) {
            data-node-id="${node.id}"
            style="${nodeStyle}">
         ${isStart ? '<div class="node-start-indicator" title="Nodo inicial">▶</div>' : ''}
-        <div class="node-input-connector" data-input-node="${node.id}" title="Soltar conexión aquí" ${npcColor ? `style="border-color: ${npcColor}"` : ''}></div>
+        <div class="node-input-connector" data-input-node="${node.id}" title="Soltar un cable aquí, o arrastrar para conectar desde otro nodo" ${npcColor ? `style="border-color: ${npcColor}"` : ''}></div>
         <div class="node-header" ${npcColor ? `style="background: ${hexToRgba(npcColor, 0.1)}; border-bottom-color: ${hexToRgba(npcColor, 0.2)};"` : ''}>
           <span class="node-type-badge" ${npcColor ? `style="background: ${hexToRgba(npcColor, 0.15)}; color: ${npcColor};"` : ''}>${isStart ? 'INICIO' : (npcName ? esc(npcName) : 'NODO')}</span>
           <div class="node-metadata-badges">
@@ -86,7 +89,7 @@ export function renderNodes(dlg, container) {
               ? `<span class="node-conn-count branches">${connCount} ramas</span>`
               : `<span class="node-conn-count">${connCount} conexion${connCount !== 1 ? 'es' : ''}</span>`
             : '<span class="node-conn-label">Arrastrar ↓</span>'}
-          <div class="node-output-connector" data-output-node="${node.id}" title="Arrastrar para conectar" ${npcColor ? `style="border-color: ${npcColor}"` : ''}></div>
+          <div class="node-output-connector" data-output-node="${node.id}" title="Arrastrar para conectar · soltar en el vacío crea un nodo nuevo" ${npcColor ? `style="border-color: ${npcColor}"` : ''}></div>
         </div>
         <div class="node-resize-handle" data-resize-node="${node.id}"></div>
       </div>
@@ -193,44 +196,22 @@ export function setupNodeInteractions(dlg, callbacks) {
     });
   });
 
-  // ── Output connector → start drawing connection ──
+  // ── Connectors → start drawing a connection (works from either end) ──
   $$('.node-output-connector').forEach((conn) => {
     conn.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
       e.stopPropagation();
       e.preventDefault();
-      isDrawing = true;
-      drawFromNodeId = conn.dataset.outputNode;
-
-      const svg = $('#canvas-svg');
-      tempLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      tempLine.classList.add('temp-connection');
-      svg.appendChild(tempLine);
-
-      // Q13: Highlight valid drop targets
-      $$(`.node-input-connector`).forEach((ic) => {
-        if (ic.dataset.inputNode !== drawFromNodeId) {
-          ic.classList.add('connect-target-highlight');
-        }
-      });
+      startDraw(conn.dataset.outputNode, 'out');
     });
   });
 
-  // ── Input connectors → receive connection ──
-  $$('.node-input-connector').forEach((inputConn) => {
-    inputConn.addEventListener('mouseup', (e) => {
-      if (!isDrawing || !drawFromNodeId) return;
+  $$('.node-input-connector').forEach((conn) => {
+    conn.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
       e.stopPropagation();
-
-      const targetNodeId = inputConn.dataset.inputNode;
-      if (targetNodeId === drawFromNodeId) {
-        toast('No se puede conectar un nodo consigo mismo', 'error');
-        endDraw();
-        return;
-      }
-
-      State.addConnection(drawFromNodeId, targetNodeId);
-      toast('Conexión creada', 'success');
-      endDraw();
+      e.preventDefault();
+      startDraw(conn.dataset.inputNode, 'in');
     });
   });
 
@@ -346,17 +327,51 @@ export function registerGlobalHandlers() {
 
     // Drawing connection line
     if (isDrawing && tempLine && drawFromNodeId) {
-      const connEl = $(`.node-output-connector[data-output-node="${drawFromNodeId}"]`);
+      const originSelector = drawMode === 'out'
+        ? `.node-output-connector[data-output-node="${drawFromNodeId}"]`
+        : `.node-input-connector[data-input-node="${drawFromNodeId}"]`;
+      const connEl = $(originSelector);
       if (!connEl) return;
       const container = $('#canvas-container');
       const connRect = connEl.getBoundingClientRect();
       const containerRect = container.getBoundingClientRect();
       const x1 = connRect.left + connRect.width / 2 - containerRect.left;
       const y1 = connRect.top + connRect.height / 2 - containerRect.top;
-      const x2 = e.clientX - containerRect.left;
-      const y2 = e.clientY - containerRect.top;
+
+      // Magnetic snap: nearest valid connector within radius
+      const snapRadius = Math.max(24, 40 * zoom);
+      let nearest = null;
+      let nearestDist = Infinity;
+      snapCandidates.forEach((c) => {
+        const r = c.getBoundingClientRect();
+        const dist = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+        if (dist < snapRadius && dist < nearestDist) {
+          nearest = c;
+          nearestDist = dist;
+        }
+      });
+
+      const dataKey = drawMode === 'out' ? 'inputNode' : 'outputNode';
+      const newSnapId = nearest ? nearest.dataset[dataKey] : null;
+      if (newSnapId !== snapTargetId) setSnapTarget(newSnapId);
+
+      let x2, y2;
+      if (nearest) {
+        const r = nearest.getBoundingClientRect();
+        x2 = r.left + r.width / 2 - containerRect.left;
+        y2 = r.top + r.height / 2 - containerRect.top;
+        tempLine.classList.add('snapped');
+      } else {
+        x2 = e.clientX - containerRect.left;
+        y2 = e.clientY - containerRect.top;
+        tempLine.classList.remove('snapped');
+      }
+
       const dy = Math.abs(y2 - y1) * 0.5;
-      tempLine.setAttribute('d', `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`);
+      const d = drawMode === 'out'
+        ? `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`
+        : `M ${x1} ${y1} C ${x1} ${y1 - dy}, ${x2} ${y2 + dy}, ${x2} ${y2}`;
+      tempLine.setAttribute('d', d);
     }
 
     // Resizing node
@@ -401,22 +416,46 @@ export function registerGlobalHandlers() {
       resizingNodeId = null;
     }
     if (isDrawing && drawFromNodeId) {
-      const target = document.elementFromPoint(e.clientX, e.clientY);
-      const isOnInputConnector = target && target.classList.contains('node-input-connector');
+      // Priority 1: magnetically snapped connector
+      let targetNodeId = snapTargetId;
 
-      if (!isOnInputConnector && activeCallbacks) {
+      // Priority 2: any part of a node under the cursor counts as a valid drop
+      if (!targetNodeId) {
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        const nodeEl = target ? target.closest('.dialogue-node') : null;
+        if (nodeEl) targetNodeId = nodeEl.dataset.nodeId;
+      }
+
+      if (targetNodeId) {
+        if (drawMode === 'out') tryConnect(drawFromNodeId, targetNodeId);
+        else tryConnect(targetNodeId, drawFromNodeId);
+      } else if (activeCallbacks) {
         // Released on empty space → create new node and connect
         const connOffset = activeCallbacks.offset;
         const connZoom = activeCallbacks.zoom;
         const container = $('#canvas-container');
         const containerRect = container.getBoundingClientRect();
-        const nodeX = (e.clientX - containerRect.left - connOffset.x) / connZoom;
-        const nodeY = (e.clientY - containerRect.top - connOffset.y) / connZoom;
+
+        // Dropped outside the canvas (sidebar, inspector...) → just cancel
+        const insideCanvas =
+          e.clientX >= containerRect.left && e.clientX <= containerRect.right &&
+          e.clientY >= containerRect.top && e.clientY <= containerRect.bottom;
+        if (!insideCanvas) {
+          endDraw();
+          return;
+        }
+
+        const dropX = (e.clientX - containerRect.left - connOffset.x) / connZoom;
+        const dropY = (e.clientY - containerRect.top - connOffset.y) / connZoom;
+        // Position the new node so its connector lands where the cable was dropped
+        const nodeX = dropX - 120;
+        const nodeY = drawMode === 'out' ? dropY : dropY - 140;
 
         State.startBatch();
         const newNode = State.addNode(nodeX, nodeY);
         if (newNode) {
-          State.addConnection(drawFromNodeId, newNode.id);
+          if (drawMode === 'out') State.addConnection(drawFromNodeId, newNode.id);
+          else State.addConnection(newNode.id, drawFromNodeId);
           State.setSelectedNodeId(newNode.id);
           State.endBatch();
           toast('Nodo creado y conectado', 'success');
@@ -427,17 +466,108 @@ export function registerGlobalHandlers() {
       endDraw();
     }
   });
+
+  // Escape → cancel in-progress cable or node drag
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+
+    if (isDrawing) {
+      endDraw();
+      return;
+    }
+
+    if (draggingNodeId && activeDlg) {
+      // Restore all dragged nodes to their start positions
+      Object.entries(dragStartPositions).forEach(([id, sp]) => {
+        const n = activeDlg.nodes.find((nn) => nn.id === id);
+        if (n) {
+          n.x = sp.x;
+          n.y = sp.y;
+          const el = $(`.dialogue-node[data-node-id="${id}"]`);
+          if (el) {
+            el.style.left = sp.x + 'px';
+            el.style.top = sp.y + 'px';
+          }
+        }
+      });
+      if (activeCallbacks && activeCallbacks.onPositionChange) {
+        const n = activeDlg.nodes.find((nn) => nn.id === draggingNodeId);
+        if (n) activeCallbacks.onPositionChange(draggingNodeId, n.x, n.y);
+      }
+      draggingNodeId = null;
+      dragStartPositions = {};
+    }
+  });
+}
+
+// ─── CONNECTION DRAWING ──────────────────────────────
+function startDraw(fromNodeId, mode) {
+  isDrawing = true;
+  drawFromNodeId = fromNodeId;
+  drawMode = mode;
+  snapTargetId = null;
+
+  const svg = $('#canvas-svg');
+  tempLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  tempLine.classList.add('temp-connection');
+  svg.appendChild(tempLine);
+
+  const container = $('#canvas-container');
+  if (container) container.classList.add('drawing-connection');
+
+  // Highlight valid drop targets and cache them for magnetic snapping
+  const selector = mode === 'out' ? '.node-input-connector' : '.node-output-connector';
+  const dataKey = mode === 'out' ? 'inputNode' : 'outputNode';
+  snapCandidates = [];
+  $$(selector).forEach((c) => {
+    if (c.dataset[dataKey] !== fromNodeId) {
+      c.classList.add('connect-target-highlight');
+      snapCandidates.push(c);
+    }
+  });
+}
+
+function setSnapTarget(nodeId) {
+  document.querySelectorAll('.connect-snap').forEach((c) => c.classList.remove('connect-snap'));
+  document.querySelectorAll('.dialogue-node.connect-snap-node').forEach((n) => n.classList.remove('connect-snap-node'));
+  snapTargetId = nodeId;
+  if (!nodeId) return;
+  const dataAttr = drawMode === 'out' ? 'data-input-node' : 'data-output-node';
+  const connEl = document.querySelector(`[${dataAttr}="${nodeId}"]`);
+  if (connEl) connEl.classList.add('connect-snap');
+  const nodeEl = document.querySelector(`.dialogue-node[data-node-id="${nodeId}"]`);
+  if (nodeEl) nodeEl.classList.add('connect-snap-node');
+}
+
+function tryConnect(sourceId, targetId) {
+  if (sourceId === targetId) {
+    toast('No se puede conectar un nodo consigo mismo', 'error');
+    return;
+  }
+  const source = activeDlg ? activeDlg.nodes.find((n) => n.id === sourceId) : null;
+  const exists = source && (source.connections || [])
+    .map(normalizeConnection)
+    .some((c) => c.targetId === targetId);
+  if (exists) {
+    toast('Esa conexión ya existe', 'info');
+    return;
+  }
+  State.addConnection(sourceId, targetId);
+  toast('Conexión creada', 'success');
 }
 
 function endDraw() {
   isDrawing = false;
   drawFromNodeId = null;
+  snapTargetId = null;
+  snapCandidates = [];
   if (tempLine) {
     tempLine.remove();
     tempLine = null;
   }
-  // Q13: Remove highlight from all input connectors
-  document.querySelectorAll('.node-input-connector.connect-target-highlight').forEach((ic) => {
-    ic.classList.remove('connect-target-highlight');
-  });
+  const container = document.querySelector('#canvas-container');
+  if (container) container.classList.remove('drawing-connection');
+  document.querySelectorAll('.connect-target-highlight').forEach((ic) => ic.classList.remove('connect-target-highlight'));
+  document.querySelectorAll('.connect-snap').forEach((c) => c.classList.remove('connect-snap'));
+  document.querySelectorAll('.dialogue-node.connect-snap-node').forEach((n) => n.classList.remove('connect-snap-node'));
 }

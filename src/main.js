@@ -1,5 +1,5 @@
 /**
- * Dialogue Forge — Main Entry Point
+ * Jamon's Dialogue Editor — Main Entry Point
  * Wires all modules together and initializes the app.
  */
 import './style.css';
@@ -15,6 +15,8 @@ import * as AI from './modules/ai.js';
 import * as Chat from './modules/chat.js';
 import * as McpBridge from './modules/mcp-bridge.js';
 import * as AudioSlicer from './modules/audio-slicer.js';
+import * as VectorMemory from './modules/vector-memory.js';
+import * as MemoryMap from './modules/memory-map.js';
 
 // ─── RENDER ALL ──────────────────────────────────────
 function renderAll() {
@@ -29,6 +31,9 @@ function renderAll() {
   const generateBtn = $('#btn-ai-generate');
   if (translateBtn) { translateBtn.disabled = !hasDlg; translateBtn.style.opacity = hasDlg ? '' : '0.4'; }
   if (generateBtn) { generateBtn.disabled = !hasDlg; generateBtn.style.opacity = hasDlg ? '' : '0.4'; }
+
+  // Keep the vector memory fresh in the background (debounced; only if already indexed)
+  VectorMemory.notifyStateChange();
 }
 
 // ─── WIRE MODULES ────────────────────────────────────
@@ -54,6 +59,11 @@ document.addEventListener('langchange', () => {
 // Audio Slicer
 AudioSlicer.init();
 $('#btn-audio-slicer')?.addEventListener('click', () => AudioSlicer.open());
+
+// Memory Map (vector memory / neural map)
+MemoryMap.init();
+MemoryMap.setOnNavigate(() => renderAll());
+$('#btn-memory-map')?.addEventListener('click', () => MemoryMap.open());
 
 // ─── TOOLBAR ─────────────────────────────────────────
 function setupToolbar() {

@@ -915,6 +915,7 @@ body {
 .node-output-connector:hover {
   background: var(--accent-secondary);
   box-shadow: 0 0 10px var(--accent-secondary-glow);
+  transform: translateX(-50%) scale(1.45);
 }
 
 /* Input connector — TOP center of node */
@@ -935,15 +936,30 @@ body {
 .node-input-connector:hover {
   background: var(--accent-primary);
   box-shadow: 0 0 10px var(--accent-glow);
+  transform: translateX(-50%) scale(1.45);
 }
 
-/* Temp connection line while drawing */
-.temp-connection {
-  stroke: var(--accent-secondary);
-  stroke-width: 2;
-  stroke-dasharray: 6 4;
-  fill: none;
-  opacity: 0.8;
+/* Invisible enlarged hit area — the visible dot stays small but is much easier to grab */
+.node-output-connector::before,
+.node-input-connector::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+
+/* Affordance: connectors grow slightly when hovering the node */
+.dialogue-node:hover .node-output-connector,
+.dialogue-node:hover .node-input-connector {
+  transform: translateX(-50%) scale(1.2);
+}
+.dialogue-node:hover .node-output-connector:hover,
+.dialogue-node:hover .node-input-connector:hover {
+  transform: translateX(-50%) scale(1.45);
 }
 
 
@@ -1452,6 +1468,20 @@ body {
   opacity: 0.7;
 }
 
+/* Cable magnetically attached to a target connector */
+.temp-connection.snapped {
+  stroke: var(--accent-secondary);
+  stroke-dasharray: none;
+  stroke-width: 2.5;
+  opacity: 1;
+}
+
+/* While drawing a cable, keep the crosshair everywhere */
+#canvas-container.drawing-connection,
+#canvas-container.drawing-connection * {
+  cursor: crosshair !important;
+}
+
 /* ===== TOAST ===== */
 .toast-container {
   position: fixed;
@@ -1798,11 +1828,33 @@ body {
 }
 
 /* ===== CONNECTION DRAG TARGET HIGHLIGHT (Q13) ===== */
-.node-input-connector.connect-target-highlight {
+/* All valid targets pulse gently while a cable is being dragged */
+.node-input-connector.connect-target-highlight,
+.node-output-connector.connect-target-highlight {
   border-color: var(--accent-secondary) !important;
+  box-shadow: 0 0 8px var(--accent-secondary-glow);
+  animation: connect-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes connect-pulse {
+  0%, 100% { transform: translateX(-50%) scale(1.1); }
+  50% { transform: translateX(-50%) scale(1.35); }
+}
+
+/* The connector the cable will snap to */
+.node-input-connector.connect-snap,
+.node-output-connector.connect-snap {
+  animation: none;
   background: var(--accent-secondary) !important;
-  box-shadow: 0 0 12px var(--accent-secondary-glow);
-  transform: scale(1.6);
+  border-color: var(--accent-secondary) !important;
+  box-shadow: 0 0 14px var(--accent-secondary-glow);
+  transform: translateX(-50%) scale(1.7) !important;
+}
+
+/* The node that will receive the connection */
+.dialogue-node.connect-snap-node {
+  border-color: var(--accent-secondary) !important;
+  box-shadow: 0 0 0 2px rgba(0, 206, 201, 0.35), var(--shadow-lg);
 }
 
 /* ===== AI CHAT PANEL ===== */
@@ -2515,4 +2567,164 @@ body {
 
 .slicer-prefix-input::placeholder {
   color: var(--text-muted);
+}
+
+/* Batch rename tools in the slicer export bar */
+.slicer-export-bar {
+  flex-wrap: wrap;
+}
+
+.slicer-input-sm {
+  width: 110px;
+}
+
+.slicer-batch-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border-medium, rgba(255, 255, 255, 0.1));
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+/* Segment name inputs that hold a manual override */
+.slicer-seg-name.slicer-seg-custom {
+  border-color: var(--accent-secondary);
+}
+
+/* ═══════════════════════════════════════════════════════
+   MEMORY MAP (neural map of the vector memory)
+   ═══════════════════════════════════════════════════════ */
+.memmap-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-medium, rgba(255, 255, 255, 0.08));
+  flex-shrink: 0;
+}
+
+.memmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.memmap-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: opacity var(--transition-fast);
+}
+
+.memmap-key i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.memmap-key:hover {
+  color: var(--text-primary);
+}
+
+.memmap-key-off {
+  opacity: 0.35;
+  text-decoration: line-through;
+}
+
+.memmap-threshold {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.memmap-threshold input[type='range'] {
+  width: 120px;
+  accent-color: var(--accent-primary);
+}
+
+.memmap-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.memmap-progress {
+  font-size: 12px;
+  color: var(--accent-secondary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.memmap-canvas-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(108, 92, 231, 0.06), transparent 60%),
+    radial-gradient(ellipse at 75% 80%, rgba(0, 206, 201, 0.05), transparent 60%),
+    var(--bg-primary);
+}
+
+#memmap-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.memmap-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 10;
+  max-width: 300px;
+  padding: 8px 10px;
+  background: var(--bg-secondary, #14161d);
+  border: 1px solid var(--border-medium, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memmap-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  padding: 24px;
+}
+
+.memmap-empty-icon {
+  font-size: 44px;
+}
+
+.memmap-empty h3 {
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.memmap-empty p {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 460px;
+  margin-bottom: 6px;
 }

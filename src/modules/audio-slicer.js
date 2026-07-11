@@ -20,7 +20,8 @@ let playheadTime = 0;   // Playback start position (set by Shift+Click)
 let zoom = 1;           // 1 = fit entire audio, higher = more zoomed in
 let scrollX = 0;        // Horizontal scroll offset in pixels
 let fileName = '';
-let exportPrefix = '';  // Prepended to each exported clip's name (user-editable)
+let namePattern = '{file}_{num}'; // Naming pattern. Tokens: {file}, {num} (01), {num3} (001)
+let customNames = [];   // Per-segment manual name overrides (index → string); survives re-renders
 
 // Canvas refs
 let waveCanvas = null;
@@ -86,14 +87,31 @@ export function init() {
   // Clear button
   overlay.querySelector('#slicer-clear')?.addEventListener('click', clearAudio);
 
-  // Export prefix input
-  const prefixInput = overlay.querySelector('#slicer-export-prefix');
-  if (prefixInput) {
-    prefixInput.addEventListener('input', () => {
-      exportPrefix = prefixInput.value;
-      renderSegmentList(); // update the filename previews
+  // Naming pattern + batch rename tools
+  const patternInput = overlay.querySelector('#slicer-name-pattern');
+  if (patternInput) {
+    patternInput.value = namePattern;
+    patternInput.addEventListener('input', () => {
+      namePattern = patternInput.value;
+      renderSegmentList(); // live preview on all non-overridden names
     });
   }
+  overlay.querySelector('#slicer-apply-pattern')?.addEventListener('click', () => {
+    customNames = []; // drop manual overrides — every segment goes back to the pattern
+    renderSegmentList();
+  });
+  overlay.querySelector('#slicer-rename-apply')?.addEventListener('click', () => {
+    if (!audioBuffer) return;
+    const find = overlay.querySelector('#slicer-rename-find')?.value ?? '';
+    const replace = overlay.querySelector('#slicer-rename-replace')?.value ?? '';
+    if (!find) return;
+    const total = markers.length + 1;
+    for (let i = 0; i < total; i++) {
+      const current = effectiveName(i, total);
+      if (current.includes(find)) customNames[i] = current.split(find).join(replace);
+    }
+    renderSegmentList();
+  });
 
   // Canvas setup
   waveCanvas = overlay.querySelector('#slicer-waveform');
@@ -161,10 +179,13 @@ async function loadAudioFile(file) {
     zoom = 1;
     scrollX = 0;
 
-    // Default export prefix derived from the file name (e.g. "recording_").
-    exportPrefix = fileName ? `${fileName}_` : '';
-    const prefixInput = overlay.querySelector('#slicer-export-prefix');
-    if (prefixInput) prefixInput.value = exportPrefix;
+    // New audio: drop manual name overrides; the pattern (with {file}) adapts alone.
+    customNames = [];
+    const patternInput = overlay.querySelector('#slicer-name-pattern');
+    if (patternInput && !patternInput.value.trim()) {
+      namePattern = '{file}_{num}';
+      patternInput.value = namePattern;
+    }
 
     // Update UI
     if (dropZone) dropZone.classList.add('hidden');
@@ -200,13 +221,11 @@ function clearAudio() {
   markers = [];
   zoom = 1;
   scrollX = 0;
-  exportPrefix = '';
+  customNames = [];
 
   const overlay = document.getElementById('audio-slicer-overlay');
   const dropZone = overlay.querySelector('.slicer-drop-zone');
   const workspace = overlay.querySelector('.slicer-workspace');
-  const prefixInput = overlay.querySelector('#slicer-export-prefix');
-  if (prefixInput) prefixInput.value = '';
 
   if (workspace) workspace.classList.add('hidden');
   if (dropZone) {
@@ -684,22 +703,47 @@ function updateTimeDisplay() {
   }
 }
 
+// ─── SEGMENT NAMING ──────────────────────────────────
+/**
+ * Expands the naming pattern for one segment.
+ * Tokens: {file} = audio file name, {num} = 01, {num3} = 001.
+ * If the pattern has no numbering token and there are multiple segments,
+ * a number is appended automatically to avoid collisions.
+ */
+function patternName(index, total) {
+  const raw = (namePattern || '').trim() || '{file}_{num}';
+  const pad2 = String(index + 1).padStart(2, '0');
+  const pad3 = String(index + 1).padStart(3, '0');
+  let name = raw
+    .split('{file}').join(fileName || 'audio')
+    .split('{num3}').join(pad3)
+    .split('{num}').join(pad2);
+  if (total > 1 && !raw.includes('{num')) name += `_${pad2}`;
+  return name;
+}
+
+/** Manual override if the user typed one; otherwise the pattern-generated name. */
+function effectiveName(index, total) {
+  const custom = customNames[index];
+  return (custom != null && custom.trim() !== '') ? custom.trim() : patternName(index, total);
+}
+
 // ─── SEGMENT LIST ────────────────────────────────────
 function renderSegmentList() {
   const list = document.querySelector('#slicer-segment-list');
   if (!list || !audioBuffer) return;
 
   const allTimes = [0, ...markers, audioBuffer.duration];
+  const total = allTimes.length - 1;
   const segments = [];
 
-  for (let i = 0; i < allTimes.length - 1; i++) {
+  for (let i = 0; i < total; i++) {
     segments.push({
       index: i,
       start: allTimes[i],
       end: allTimes[i + 1],
-      // Default base name is just the sequential number; the export prefix
-      // is prepended at export time.
-      baseName: String(i + 1).padStart(2, '0'),
+      name: effectiveName(i, total),
+      isCustom: customNames[i] != null && customNames[i].trim() !== '',
     });
   }
 
@@ -708,15 +752,10 @@ function renderSegmentList() {
     return;
   }
 
-  const prefixHtml = exportPrefix
-    ? `<span class="slicer-seg-prefix" title="Prefijo (edítalo en la barra de exportación)">${esc(exportPrefix)}</span>`
-    : '';
-
   list.innerHTML = segments.map((seg) => `
     <div class="slicer-segment" data-index="${seg.index}">
       <span class="slicer-seg-num">${seg.index + 1}</span>
-      ${prefixHtml}
-      <input class="slicer-seg-name" type="text" value="${esc(seg.baseName)}" data-index="${seg.index}" spellcheck="false" placeholder="nombre_segmento">
+      <input class="slicer-seg-name ${seg.isCustom ? 'slicer-seg-custom' : ''}" type="text" value="${esc(seg.name)}" data-index="${seg.index}" spellcheck="false" placeholder="${esc(patternName(seg.index, total))}" title="Nombre del archivo (.wav). Vacío = usa el patrón.">
       <button class="slicer-seg-play" data-start="${seg.start}" data-end="${seg.end}" title="Reproducir segmento">
         <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       </button>
@@ -724,6 +763,17 @@ function renderSegmentList() {
       <span class="slicer-seg-duration">${(seg.end - seg.start).toFixed(1)}s</span>
     </div>
   `).join('');
+
+  // Persist manual edits immediately so re-renders (marker add/move) never lose them
+  list.querySelectorAll('.slicer-seg-name').forEach((input) => {
+    input.addEventListener('input', () => {
+      const idx = parseInt(input.dataset.index);
+      const val = input.value;
+      // Typing exactly the pattern name (or clearing) removes the override
+      customNames[idx] = (val.trim() === '' || val === patternName(idx, total)) ? null : val;
+      input.classList.toggle('slicer-seg-custom', customNames[idx] != null);
+    });
+  });
 
   // Attach play handlers
   list.querySelectorAll('.slicer-seg-play').forEach((btn) => {
@@ -738,20 +788,16 @@ function renderSegmentList() {
 function getSegments() {
   if (!audioBuffer) return [];
   const allTimes = [0, ...markers, audioBuffer.duration];
+  const total = allTimes.length - 1;
   const segments = [];
-  const list = document.querySelector('#slicer-segment-list');
+  const used = new Set();
 
-  for (let i = 0; i < allTimes.length - 1; i++) {
-    const nameInput = list?.querySelector(`.slicer-seg-name[data-index="${i}"]`);
-    const baseName = nameInput?.value.trim() || String(i + 1).padStart(2, '0');
-    // Final filename: prefix + per-segment name (e.g. "dialogo_01").
-    const name = sanitizeFileName(`${exportPrefix}${baseName}`) || String(i + 1).padStart(2, '0');
-    segments.push({
-      index: i,
-      start: allTimes[i],
-      end: allTimes[i + 1],
-      name,
-    });
+  for (let i = 0; i < total; i++) {
+    let name = sanitizeFileName(effectiveName(i, total)) || String(i + 1).padStart(2, '0');
+    // Duplicate names would silently overwrite each other in the folder/zip
+    while (used.has(name)) name = `${name}_${i + 1}`;
+    used.add(name);
+    segments.push({ index: i, start: allTimes[i], end: allTimes[i + 1], name });
   }
   return segments;
 }

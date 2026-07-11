@@ -11,7 +11,7 @@
   },
   "build": {
     "appId": "com.dialogueforge.app",
-    "productName": "Dialogue Forge",
+    "productName": "Jamon's Dialogue Editor",
     "directories": {
       "output": "release"
     },
@@ -30,7 +30,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Dialogue Forge"
+      "shortcutName": "Jamon's Dialogue Editor"
     },
     "publish": null
   },
@@ -42,6 +42,7 @@
     "wait-on": "^8.0.3"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "jszip": "^3.10.1",
     "pdfjs-dist": "^6.0.227",
