@@ -2658,6 +2658,10 @@ body {
   margin-left: auto;
 }
 
+#memmap-rotate.memmap-rotate-off {
+  opacity: 0.45;
+}
+
 .memmap-progress {
   font-size: 12px;
   color: var(--accent-secondary);

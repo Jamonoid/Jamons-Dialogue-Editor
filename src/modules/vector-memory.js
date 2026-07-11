@@ -124,19 +124,31 @@ async function getEmbedder() {
   return embedderPromise;
 }
 
-/** Embeds texts in small batches; returns arrays of normalized floats. */
-async function embedTexts(texts) {
+/**
+ * E5-family models are trained with "query: "/"passage: " prefixes and
+ * retrieve noticeably worse without them; other models take the raw text.
+ */
+function isE5Model() {
+  return /(^|[/\-_])e5([\-_]|$)/i.test(getModelId());
+}
+
+/**
+ * Embeds texts in small batches; returns arrays of normalized floats.
+ * kind: 'passage' for stored items, 'query' for search queries (E5 prefixes).
+ */
+async function embedTexts(texts, kind = 'passage') {
   const extractor = await getEmbedder();
+  const input = isE5Model() ? texts.map((t) => `${kind}: ${t}`) : texts;
   const vectors = [];
   const BATCH = 8;
-  for (let i = 0; i < texts.length; i += BATCH) {
-    const batch = texts.slice(i, i + BATCH);
+  for (let i = 0; i < input.length; i += BATCH) {
+    const batch = input.slice(i, i + BATCH);
     const t = await extractor(batch, { pooling: 'mean', normalize: true });
     const [n, dim] = t.dims;
     for (let j = 0; j < n; j++) {
       vectors.push(Array.from(t.data.slice(j * dim, (j + 1) * dim)));
     }
-    reportProgress({ phase: 'embed', done: Math.min(i + BATCH, texts.length), total: texts.length });
+    reportProgress({ phase: 'embed', done: Math.min(i + BATCH, input.length), total: input.length });
   }
   return vectors;
 }
@@ -216,16 +228,22 @@ export async function indexProject() {
   if (indexing) return { skipped: true };
   indexing = true;
   try {
+    const modelId = getModelId();
     const wanted = collectProjectItems();
     const existing = await loadAllItems();
     const existingByKey = new Map(existing.map((it) => [it.key, it]));
 
+    // Re-embed on content change AND on model change: vectors from different
+    // models can share dimensions but live in incompatible spaces.
     const toEmbed = [];
     for (const item of wanted) {
       const hash = hashStr(item.text);
       const prev = existingByKey.get(item.key);
-      if (!prev || prev.hash !== hash) toEmbed.push({ ...item, hash });
+      if (!prev || prev.hash !== hash || prev.model !== modelId) toEmbed.push({ ...item, hash });
     }
+
+    // Chat items survive reindexes but must migrate to the current model too
+    const staleChat = existing.filter((it) => it.type === 'chat' && it.model !== modelId);
 
     // Stale = stored project items whose key no longer exists (chat is kept)
     const wantedKeys = new Set(wanted.map((it) => it.key));
@@ -233,12 +251,15 @@ export async function indexProject() {
       .filter((it) => it.type !== 'chat' && !wantedKeys.has(it.key))
       .map((it) => it.key);
 
-    if (toEmbed.length > 0) {
-      const vectors = await embedTexts(toEmbed.map((it) => it.text));
+    if (toEmbed.length > 0 || staleChat.length > 0) {
+      const vectors = await embedTexts([...toEmbed, ...staleChat].map((it) => it.text));
       const now = Date.now();
       await tx('readwrite', (store) => {
         toEmbed.forEach((item, i) => {
-          store.put({ ...item, vector: vectors[i], updatedAt: now });
+          store.put({ ...item, model: modelId, vector: vectors[i], updatedAt: now });
+        });
+        staleChat.forEach((item, i) => {
+          store.put({ ...item, model: modelId, vector: vectors[toEmbed.length + i] });
         });
         staleKeys.forEach((key) => store.delete(key));
       });
@@ -279,10 +300,12 @@ export async function search(query, { k = 8, types = null } = {}) {
   const items = await loadAllItems();
   if (items.length === 0) return [];
 
-  const [queryVec] = await embedTexts([query]);
+  const modelId = getModelId();
+  const [queryVec] = await embedTexts([query], 'query');
   const results = [];
   for (const item of items) {
     if (types && !types.includes(item.type)) continue;
+    if (item.model !== modelId) continue; // stale vector from another embedding model
     const v = item.vector;
     if (!v || v.length !== queryVec.length) continue;
     let dot = 0;
@@ -304,6 +327,7 @@ export async function addChatExchange(userText, assistantText) {
     type: 'chat',
     text,
     hash: hashStr(text),
+    model: getModelId(),
     vector,
     meta: { ts: now },
     updatedAt: now,

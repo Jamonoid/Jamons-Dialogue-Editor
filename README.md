@@ -44,7 +44,7 @@ Editor visual de árboles de diálogo construido para el desarrollo de videojueg
 - **Embeddings 100% locales** con transformers.js (descarga el modelo una vez, ~50 MB, luego funciona offline; sin API key). Modelo configurable en la Configuración de IA
 - **Indexa todo el proyecto**: nodos de diálogo, archivos de contexto (troceados), NPCs, quests e historial del chat. Los vectores viven en IndexedDB, fuera del estado del proyecto
 - **RAG en chat y generación**: cada mensaje del chat y cada generación de diálogo recupera los fragmentos semánticamente más relevantes en lugar de volcar toda la documentación (menos tokens, mejores respuestas, documentación sin límite de tamaño)
-- **Mapa neuronal** (botón 🧠 Memoria): visualización 2D de toda la memoria (proyección PCA) con conexiones por similitud, filtros por tipo, zoom/pan, tooltips y clic para navegar al nodo en el editor
+- **Mapa neuronal 3D** (botón 🧠 Memoria): visualización 3D de toda la memoria (proyección PCA a 3 componentes) con cámara orbital (arrastrar = rotar, Shift/clic derecho = mover, rueda = zoom), rotación automática, conexiones por similitud, filtros por tipo, tooltips y clic para navegar al nodo en el editor
 - **Indexación incremental**: la primera indexación es manual ("⚡ Indexar proyecto"); después se refresca sola en segundo plano al editar
 - El botón 🗑 del chat borra el historial y su memoria vectorial
 

@@ -474,6 +474,7 @@
         <span id="memmap-stats" class="slicer-file-info"></span>
         <div class="slicer-header-actions">
           <button class="btn btn-sm" id="memmap-reindex" title="Reindexar el proyecto (nodos, archivos, NPCs, quests)">⚡ Reindexar</button>
+          <button class="btn btn-sm" id="memmap-clear" title="Borrar todos los vectores del índice, incluida la memoria del chat">🗑 Borrar índice</button>
           <button class="slicer-close" id="memmap-close" title="Cerrar (Esc)">✕</button>
         </div>
       </div>
@@ -492,7 +493,8 @@
           <input type="range" id="memmap-threshold" min="0.5" max="0.95" step="0.05" value="0.75" />
           <span id="memmap-threshold-value">0.75</span>
         </label>
-        <span class="memmap-hint">Arrastrar = mover · Rueda = zoom · Doble clic = ajustar · Clic en nodo = ir al nodo</span>
+        <button class="btn btn-sm" id="memmap-rotate" title="Activar/pausar la rotación automática">⟳ Girar</button>
+        <span class="memmap-hint">Arrastrar = rotar · Shift/clic der. = mover · Rueda = zoom · Doble clic = centrar · Clic en nodo = ir al nodo</span>
       </div>
 
       <div class="memmap-canvas-wrap">
