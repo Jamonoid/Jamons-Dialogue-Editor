@@ -10,6 +10,7 @@
  */
 import * as State from './state.js';
 import * as AI from './ai.js';
+import { toast } from './ui.js';
 
 const DB_NAME = 'dialogueForge_vectors';
 const DB_VERSION = 1;
@@ -22,6 +23,7 @@ const TYPE_LABELS = {
   file: 'Archivo',
   npc: 'NPC',
   quest: 'Quest',
+  dialogue: 'Diálogo',
   chat: 'Chat',
 };
 
@@ -31,6 +33,7 @@ let embedderPromise = null;
 let embedderModelId = null;
 let itemsCache = null;      // in-memory mirror of the IndexedDB store
 let indexing = false;
+let cancelRequested = false;
 let refreshTimer = null;
 let progressCb = null;
 
@@ -47,6 +50,9 @@ export function getModelId() {
 }
 
 export function isIndexing() { return indexing; }
+
+/** Aborts the current indexing run between batches (nothing is persisted). */
+export function requestCancel() { if (indexing) cancelRequested = true; }
 
 // ─── INDEXEDDB ───────────────────────────────────────
 function openDB() {
@@ -99,7 +105,7 @@ export async function getStats() {
   const items = await loadAllItems().catch(() => []);
   const byType = {};
   for (const it of items) byType[it.type] = (byType[it.type] || 0) + 1;
-  return { total: items.length, byType, model: getModelId() };
+  return { total: items.length, byType, model: getModelId(), device: activeDevice };
 }
 
 export async function getAllItems() {
@@ -107,48 +113,150 @@ export async function getAllItems() {
 }
 
 // ─── EMBEDDER (transformers.js, lazy-loaded) ─────────
+
+/**
+ * Per-model usage profile. Embedding models are NOT interchangeable in how
+ * they must be called: E5 needs "query:"/"passage:" prefixes, Qwen3-Embedding
+ * needs an instruction-formatted query + last-token pooling (decoder-based),
+ * BGE-M3's dense vector is the CLS hidden state. Getting this wrong doesn't
+ * error — it just silently retrieves much worse.
+ */
+function getModelProfile() {
+  const id = getModelId();
+  if (/qwen3-embedding/i.test(id)) {
+    return {
+      pooling: 'last_token',
+      formatQuery: (q) => `Instruct: Given a search query, retrieve relevant passages that answer the query\nQuery:${q}`,
+      formatPassage: (t) => t,
+    };
+  }
+  if (/(^|[/\-_])e5([\-_]|$)/i.test(id)) {
+    return {
+      pooling: 'mean',
+      formatQuery: (q) => `query: ${q}`,
+      formatPassage: (t) => `passage: ${t}`,
+    };
+  }
+  if (/bge-m3/i.test(id)) {
+    return { pooling: 'cls', formatQuery: (q) => q, formatPassage: (t) => t };
+  }
+  // sentence-transformers style (MiniLM, mpnet...): mean pooling, raw text
+  return { pooling: 'mean', formatQuery: (q) => q, formatPassage: (t) => t };
+}
+
+/** 'webgpu (fp16)' | 'wasm (q8)' | null — which backend the embedder ended up on. */
+let activeDevice = null;
+export function getActiveDevice() { return activeDevice; }
+
 async function getEmbedder() {
   const modelId = getModelId();
   if (embedderPromise && embedderModelId === modelId) return embedderPromise;
   embedderModelId = modelId;
   embedderPromise = (async () => {
-    reportProgress({ phase: 'model', message: 'Cargando modelo de embeddings (primera vez descarga ~50 MB)...' });
+    reportProgress({ phase: 'model', message: 'Cargando modelo de embeddings (la primera vez se descarga: 50 MB–1 GB según el modelo)...' });
     // Lazy import so the WASM/model never bloats app startup (same pattern as pdfjs/jszip)
     const { pipeline, env } = await import('@huggingface/transformers');
     env.allowLocalModels = false; // always resolve from the HF hub + browser cache
-    const extractor = await pipeline('feature-extraction', modelId, { dtype: 'q8' });
-    reportProgress({ phase: 'model', message: 'Modelo de embeddings listo.' });
-    return extractor;
+
+    // Real download feedback: transformers.js reports per-file byte progress.
+    // Aggregate across files (model weights + tokenizer + config) and throttle.
+    const dlFiles = new Map();
+    let lastDlReport = 0;
+    const progress_callback = (p) => {
+      if (!p || p.status !== 'progress' || !p.file) return;
+      dlFiles.set(p.file, { loaded: p.loaded || 0, total: p.total || 0 });
+      const now = Date.now();
+      if (now - lastDlReport < 150 && p.loaded !== p.total) return;
+      lastDlReport = now;
+      let loaded = 0, total = 0;
+      for (const f of dlFiles.values()) { loaded += f.loaded; total += f.total; }
+      if (total > 0) reportProgress({ phase: 'download', loaded, total });
+    };
+
+    // Backend attempt chain. IMPORTANT: ORT's WebGPU execution provider lives
+    // inside the same WASM binary as the CPU one, so any global wasm state
+    // (like the worker proxy) that breaks, breaks EVERY backend — never leave
+    // dirty global flags behind between attempts.
+    const attempts = [];
+    if (typeof navigator !== 'undefined' && navigator.gpu) {
+      // Probe the adapter BEFORE downloading GPU weights — if WebGPU is
+      // disabled/blocklisted, fail fast instead of wasting a ~1 GB download.
+      let adapter = null;
+      try {
+        adapter = (await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }))
+          || (await navigator.gpu.requestAdapter());
+      } catch { /* treated as no adapter */ }
+      if (adapter) {
+        try { console.log('[VectorMemory] WebGPU adapter:', adapter.info?.vendor || '?', adapter.info?.architecture || ''); } catch { /* info optional */ }
+        // fp16 first (half the download); fp32 as a compatibility fallback
+        // for adapters without usable shader-f16.
+        attempts.push({ device: 'webgpu', dtype: 'fp16', label: 'GPU fp16' });
+        attempts.push({ device: 'webgpu', dtype: 'fp32', label: 'GPU fp32' });
+      } else {
+        console.warn('[VectorMemory] WebGPU: requestAdapter() devolvió null — GPU bloqueada o WebGPU deshabilitado. Si acabas de actualizar, cierra y relanza la app completa (el flag de Electron no se aplica con hot-reload).');
+      }
+    } else {
+      console.warn('[VectorMemory] navigator.gpu no existe en este entorno — embeddings en CPU.');
+    }
+    attempts.push({ dtype: 'q8', label: 'CPU q8' });
+
+    let lastErr = null;
+    for (const att of attempts) {
+      try {
+        try { env.backends.onnx.wasm.proxy = false; } catch { /* keep deterministic wasm state */ }
+        reportProgress({ phase: 'model', message: `Cargando modelo (${att.label})...` });
+        const opts = { dtype: att.dtype, progress_callback };
+        if (att.device) opts.device = att.device;
+        const extractor = await pipeline('feature-extraction', modelId, opts);
+        reportProgress({ phase: 'model', message: `Preparando el modelo (${att.label})...` });
+        await extractor('warmup', { pooling: getModelProfile().pooling, normalize: true });
+        activeDevice = att.device ? `webgpu (${att.dtype})` : 'wasm (q8)';
+        reportProgress({ phase: 'model', message: `Modelo de embeddings listo — ${att.label}.` });
+        if (!att.device && /qwen3|bge-m3|large/i.test(modelId)) {
+          toast('Sin GPU (WebGPU): este modelo de embeddings es grande y será MUY lento en CPU. Considera "Xenova/multilingual-e5-small" en IA Config.', 'error');
+        }
+        return extractor;
+      } catch (err) {
+        lastErr = err;
+        const reason = (err?.message || String(err)).slice(0, 140);
+        console.warn(`[VectorMemory] Backend ${att.label} falló:`, err);
+        reportProgress({ phase: 'model', message: `${att.label} falló (${reason}) — probando el siguiente backend...` });
+        dlFiles.clear();
+      }
+    }
+    throw lastErr || new Error('No se pudo inicializar ningún backend de embeddings.');
   })();
   embedderPromise.catch(() => { embedderPromise = null; embedderModelId = null; });
   return embedderPromise;
 }
 
 /**
- * E5-family models are trained with "query: "/"passage: " prefixes and
- * retrieve noticeably worse without them; other models take the raw text.
- */
-function isE5Model() {
-  return /(^|[/\-_])e5([\-_]|$)/i.test(getModelId());
-}
-
-/**
  * Embeds texts in small batches; returns arrays of normalized floats.
- * kind: 'passage' for stored items, 'query' for search queries (E5 prefixes).
+ * kind: 'passage' for stored items, 'query' for search queries — the model
+ * profile decides pooling and how each kind is formatted.
  */
 async function embedTexts(texts, kind = 'passage') {
   const extractor = await getEmbedder();
-  const input = isE5Model() ? texts.map((t) => `${kind}: ${t}`) : texts;
+  const profile = getModelProfile();
+  const format = kind === 'query' ? profile.formatQuery : profile.formatPassage;
+  const input = texts.map(format);
   const vectors = [];
   const BATCH = 8;
+  // Report before the first batch so the UI switches from "downloading" to
+  // "embedding 0/N" immediately (the first batch can take a while on CPU).
+  if (input.length > 1) reportProgress({ phase: 'embed', done: 0, total: input.length });
+  const t0 = Date.now();
   for (let i = 0; i < input.length; i += BATCH) {
+    if (cancelRequested) throw new Error('__cancelled__');
     const batch = input.slice(i, i + BATCH);
-    const t = await extractor(batch, { pooling: 'mean', normalize: true });
+    const t = await extractor(batch, { pooling: profile.pooling, normalize: true });
     const [n, dim] = t.dims;
     for (let j = 0; j < n; j++) {
       vectors.push(Array.from(t.data.slice(j * dim, (j + 1) * dim)));
     }
-    reportProgress({ phase: 'embed', done: Math.min(i + BATCH, input.length), total: input.length });
+    const done = Math.min(i + BATCH, input.length);
+    const etaMs = ((Date.now() - t0) / done) * (input.length - done);
+    reportProgress({ phase: 'embed', done, total: input.length, etaMs });
   }
   return vectors;
 }
@@ -188,13 +296,28 @@ function collectProjectItems() {
   const state = State.getState();
   const items = [];
 
+  // Author notes ("comment") carry context the AI can't infer from names alone
+  const withNote = (base, obj) => (obj.comment && obj.comment.trim() ? `${base} — ${obj.comment.trim()}` : base);
+
   for (const npc of state.npcs || []) {
-    items.push({ key: `npc:${npc.id}`, type: 'npc', text: `NPC: ${npc.name}`, meta: { id: npc.id, name: npc.name } });
+    items.push({ key: `npc:${npc.id}`, type: 'npc', text: withNote(`NPC: ${npc.name}`, npc), meta: { id: npc.id, name: npc.name } });
   }
   for (const q of state.quests || []) {
-    items.push({ key: `quest:${q.id}`, type: 'quest', text: `Quest: ${q.name}`, meta: { id: q.id, name: q.name } });
+    items.push({ key: `quest:${q.id}`, type: 'quest', text: withNote(`Quest: ${q.name}`, q), meta: { id: q.id, name: q.name } });
   }
   for (const dlg of state.dialogues || []) {
+    // Dialogue-level item: title + relations + author note (nodes go separately below)
+    const dlgNpc = dlg.npcId ? State.getNPC(dlg.npcId) : null;
+    const dlgQuest = dlg.questId ? (state.quests || []).find((q) => q.id === dlg.questId) : null;
+    const parts = [`Diálogo: ${dlg.title}`];
+    if (dlgNpc) parts.push(`NPC: ${dlgNpc.name}`);
+    if (dlgQuest) parts.push(`Quest: ${dlgQuest.name}`);
+    items.push({
+      key: `dialogue:${dlg.id}`,
+      type: 'dialogue',
+      text: withNote(parts.join(' · '), dlg),
+      meta: { dialogueId: dlg.id, dialogueTitle: dlg.title },
+    });
     for (const node of dlg.nodes || []) {
       const es = node.text?.es || '';
       const en = node.text?.en || '';
@@ -227,6 +350,7 @@ function collectProjectItems() {
 export async function indexProject() {
   if (indexing) return { skipped: true };
   indexing = true;
+  cancelRequested = false;
   try {
     const modelId = getModelId();
     const wanted = collectProjectItems();
@@ -271,8 +395,14 @@ export async function indexProject() {
     const stats = await getStats();
     reportProgress({ phase: 'done', added: toEmbed.length, removed: staleKeys.length, total: stats.total });
     return { added: toEmbed.length, removed: staleKeys.length, total: stats.total };
+  } catch (err) {
+    // User-requested cancel: nothing was persisted (the write happens after
+    // all embeddings complete), so the index is exactly as it was before.
+    if (err && err.message === '__cancelled__') return { cancelled: true };
+    throw err;
   } finally {
     indexing = false;
+    cancelRequested = false;
   }
 }
 

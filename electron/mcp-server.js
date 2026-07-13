@@ -31,7 +31,7 @@ function buildServer(exec) {
   // ── Read tools ──
   register(
     'get_project_summary',
-    'Overview of the whole Dialogue Forge project: NPCs, quests, and dialogues (with node counts and which one is active on the canvas).',
+    'Overview of the whole Dialogue Forge project: NPCs, quests, and dialogues (with node counts and which one is active on the canvas). Each item includes its author comment ("comment") — context notes like when a dialogue triggers or who an NPC is.',
     {},
   );
   register(
@@ -48,6 +48,7 @@ function buildServer(exec) {
       title: z.string().describe('Dialogue title'),
       npc_name: z.string().optional().describe('Main NPC name'),
       quest_name: z.string().optional().describe('Quest name'),
+      comment: z.string().optional().describe('Author note giving the AI context, e.g. "Triggers when the player returns the sword at the end of the quest"'),
     },
   );
   register(
@@ -104,6 +105,15 @@ function buildServer(exec) {
     'auto_layout',
     'Automatically arrange the nodes of the active dialogue on the canvas (tree layout). Call after adding several nodes.',
     {},
+  );
+  register(
+    'set_comment',
+    'Set the author note of an NPC, quest or dialogue. These notes give the AI context it cannot infer (when a dialogue triggers, who an NPC is, what a quest is about). Pass an empty string to clear.',
+    {
+      type: z.enum(['npc', 'quest', 'dialogue']).describe('Kind of item to annotate'),
+      id: z.string().describe('ID of the NPC / quest / dialogue'),
+      comment: z.string().describe('The author note (empty string clears it)'),
+    },
   );
 
   return server;

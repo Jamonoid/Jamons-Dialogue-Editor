@@ -10,6 +10,11 @@ const __dirname = path.dirname(__filename);
 
 const isDev = !app.isPackaged;
 
+// Expose WebGPU to the renderer (used by the local embeddings to run on the
+// GPU via transformers.js). On some Electron/driver combos the adapter is
+// behind this flag; harmless where WebGPU is already available.
+app.commandLine.appendSwitch('enable-unsafe-webgpu');
+
 let mainWindow = null;
 
 function createWindow() {

@@ -65,10 +65,10 @@ Nodes contain a `<textarea>` that allows direct inline text editing on the canva
 
 ```js
 {
-  npcs: [{ id, name, color }],
-  quests: [{ id, name }],
+  npcs: [{ id, name, color, comment }],
+  quests: [{ id, name, comment }],
   dialogues: [{
-    id, title, npcId, questId, startNodeId,
+    id, title, npcId, questId, comment, startNodeId,
     nodes: [{
       id,
       text: { es, en },
@@ -146,7 +146,7 @@ claude mcp add --transport http --scope user dialogue-forge http://127.0.0.1:474
 
 Tools (`src/modules/mcp-bridge.js`, all operate on the **active** dialogue unless noted):
 - **Read**: `get_project_summary`, `get_dialogue`
-- **Edit**: `create_dialogue`, `set_active_dialogue`, `add_node`, `update_node`, `connect_nodes`, `delete_node`, `set_start_node`, `create_npc`, `auto_layout`
+- **Edit**: `create_dialogue`, `set_active_dialogue`, `add_node`, `update_node`, `connect_nodes`, `delete_node`, `set_start_node`, `create_npc`, `auto_layout`, `set_comment` (author note on an npc/quest/dialogue)
 
 The MCP server only responds while the app window is open; tool calls return `{ ok: false, error }` if the window is closed or the bridge hasn't loaded.
 
@@ -183,14 +183,16 @@ The AI settings modal (`ui.js`) shows: "same provider everywhere" shortcuts, `<d
 
 ### Vector Memory (RAG) & Neural Map
 
-- `vector-memory.js` embeds **dialogue nodes, context files (chunked ~800 chars), NPCs, quests and chat exchanges** with a local transformers.js model (lazy `import()`, `dtype: 'q8'`, downloads once then cached by the browser). Vectors live in **IndexedDB** (`dialogueForge_vectors`), deliberately outside `state` so the undo system never serializes them.
+- `vector-memory.js` embeds **dialogue nodes, dialogues (title + NPC/quest relations + author note), context files (chunked ~800 chars), NPCs, quests and chat exchanges** with a local transformers.js model (lazy `import()`, `dtype: 'q8'`, downloads once then cached by the browser). Vectors live in **IndexedDB** (`dialogueForge_vectors`), deliberately outside `state` so the undo system never serializes them.
 - Indexing is **incremental** (djb2 content hash per item; stale project items are pruned; chat items are only managed by `addChatExchange`/`clearChatMemory`, capped at 300). A debounced (45 s) background refresh runs from `renderAll()` **only if an index already exists** — the first index is always an explicit user action (Memory Map → "⚡ Indexar proyecto") so the model download is never a surprise.
 - **Model tracking**: every stored item records the embedding `model` it was vectorized with. `indexProject()` re-embeds items whose model no longer matches the configured one (chat items included — they migrate instead of being pruned), and `search()` skips mismatched vectors, so switching the embeddings model never silently mixes incompatible vector spaces. After changing the model, run "⚡ Reindexar" once to migrate the whole index.
-- **E5 prefixes**: `embedTexts(texts, kind)` prepends `"passage: "` (stored items) / `"query: "` (searches) when the configured model is an E5-family model (`isE5Model()`, matched by id) — E5 models are trained with these prefixes and retrieve noticeably worse without them. `Xenova/multilingual-e5-small` is the recommended pick for Spanish-first projects.
+- **Model profiles**: `getModelProfile()` (matched by model id) decides pooling and query/passage formatting per model family — getting this wrong doesn't error, it silently retrieves worse. Qwen3-Embedding → `last_token` pooling + instruction-formatted queries (`Instruct: ...\nQuery:...`); E5 family → `mean` pooling + `"query: "`/`"passage: "` prefixes; BGE-M3 → `cls` pooling; default (MiniLM/mpnet) → `mean`, raw text. `embedTexts(texts, kind)` applies the profile.
+- **Device selection**: `getEmbedder()` tries **WebGPU first** (`device: 'webgpu'`, `dtype: 'fp16'`, with a warmup inference to catch late failures) and falls back to WASM/CPU (`dtype: 'q8'`). WebGPU makes the large models practical (10-100x faster). `getStats().device` / the memory-map footer show which backend is active.
+- **Recommended models** (quality order, `<datalist>` in the settings modal): `onnx-community/Qwen3-Embedding-0.6B-ONNX` (best, ~1 GB, wants GPU) > `Xenova/multilingual-e5-large` ≈ `Xenova/bge-m3` > `Xenova/multilingual-e5-base` > `Xenova/multilingual-e5-small` (safe CPU pick).
 - The Memory Map header has a "🗑 Borrar índice" button (`confirmDelete` + `VectorMemory.clearAll()`) that wipes all vectors including chat memory.
 - The chat performs top-k (8) cosine retrieval per message and injects a `Relevant Project Memory` block into the system prompt; when there is no index it falls back to the old full-text dump of context files. Each successful exchange is remembered (fire-and-forget). The 🗑 button in the chat header clears history + chat vectors.
 - Dialogue **generation & extension** (`ai.js` → `getContextAndNpcs(query)`) also use RAG: top-k (10) retrieval against the generation prompt, filtered to `file`/`node`/`npc`/`quest` types (chat exchanges are excluded — they are not world lore). Falls back to the raw 8000-char context-file dump when there is no index or retrieval fails. Uses a dynamic `import('./vector-memory.js')` because `vector-memory.js` statically imports `ai.js` (cycle avoidance).
-- `memory-map.js` ("🧠 Memoria" toolbar button) renders the vectors in **3D** on a full-screen canvas overlay — plain canvas 2D with a hand-rolled perspective projection, no WebGL/three.js. PCA to 3 components via covariance-free power iteration (deflation against previous PCs), each axis normalized into a ±500 world cube. Orbit camera: drag = rotate (yaw/pitch, pitch clamped ±1.55), shift/right/middle-drag = pan, wheel = dolly zoom (cursor-anchored via pan compensation), double-click = reset view. Idle auto-rotation via a rAF loop (stops on first drag; the "⟳ Girar" button toggles it; paused while hovering a point). Depth cues: painter's-algorithm sorting, perspective-scaled radii, depth-based alpha, link fade with distance, and a faint wireframe of the world cube. kNN similarity links (threshold slider; skipped above 600 items, hover-only links instead), legend toggles per type, tooltips on projected positions, and click-to-navigate on node points (`setActiveDialogueId` + `setSelectedNodeId` + `notifyChange`; clicks after a >4 px drag are ignored). `reload()` only projects the largest same-model vector group (mixed embedding models would corrupt the PCA) and shows a "Reindexar para migrarlos" hint when vectors are hidden.
+- `memory-map.js` ("🧠 Memoria" toolbar button) renders the vectors in **3D** on a full-screen canvas overlay — plain canvas 2D with a hand-rolled perspective projection, no WebGL/three.js. PCA to 3 components via covariance-free power iteration (deflation against previous PCs), each axis normalized into a ±500 world cube. Orbit camera: drag = rotate (yaw/pitch, pitch clamped ±1.55), shift/right/middle-drag = pan, wheel = dolly zoom (cursor-anchored via pan compensation), double-click = reset view. Idle auto-rotation via a rAF loop (stops on first drag; the "⟳ Girar" button toggles it; paused while hovering a point). Depth cues: painter's-algorithm sorting, perspective-scaled radii, depth-based alpha, link fade with distance, and a faint wireframe of the world cube. kNN similarity links (threshold slider; skipped above 600 items, hover-only links instead), legend toggles per type, and tooltips on projected positions. **Clicking a point opens a right-side detail panel** (`#memmap-detail`: type badge, metadata, full text, top-6 cosine neighbors — clickable; node/dialogue items get a "→ Ir/Abrir" button which is the only thing that navigates to the editor; clicks after a >4 px drag are ignored, empty-space click closes the panel). The toolbar **RAG test search** (`#memmap-search`, Enter) runs `VectorMemory.search()` — the exact chat/generation retrieval path — listing ranked results with scores in the panel and spotlighting hits on the canvas (gold rings, non-hits dimmed). **Model load feedback**: `getEmbedder()` passes a `progress_callback` that aggregates per-file byte progress into `{phase:'download', loaded, total}`; the map renders it as MB text + a progress bar (also used for embed progress). Escape peels layers: detail panel → search highlights → overlay. `reload()` only projects the largest same-model vector group (mixed embedding models would corrupt the PCA) and shows a "Reindexar para migrarlos" hint when vectors are hidden.
 Legacy configs with a single `model` field are auto-migrated to all three on first load. Missing `provider*` fields default to `'openrouter'`. The settings modal (`ui.js`) shows a provider dropdown next to each per-task model input; the model field placeholder/hint switches between OpenRouter model IDs and Claude aliases based on the selected provider.
 
 #### Translation (ES → EN only)
@@ -247,6 +249,7 @@ npm run build    # Build for production (dist/)
 
 ## Conventions
 
+- **Author Notes (`comment`)**: NPCs, quests and dialogues carry an optional `comment` string ("Nota del autor"), edited via a textarea in the inspector (same silent-update pattern as names: `updateNPCComment`/`updateQuestComment`/`updateDialogue`). It exists because the AI can't infer nomenclature on its own (e.g. "dialogue that triggers at the end of quest X"). It is exposed to the AI everywhere: chat project context (`NOTE:"..."` + a system-prompt rule), generation/extension prompts (NPC list + active-dialogue note block), the vector index (npc/quest/dialogue item texts) and MCP (`get_project_summary`, `get_dialogue`, `create_dialogue.comment`, `set_comment`). Legacy data without the field is handled with `|| ''` guards.
 - **Language**: Code is in English. UI text is in Spanish.
 - **AI Prompts**: All system prompts sent to the LLM are in English.
 - **No frameworks**: Pure vanilla JS with ES modules.

@@ -169,7 +169,7 @@ export function setActiveDialogueId(id) {
 export function addNPC(name) {
   pushUndo();
   const colorIndex = state.npcs.length % NPC_COLORS.length;
-  const npc = { id: uid(), name, color: NPC_COLORS[colorIndex] };
+  const npc = { id: uid(), name, color: NPC_COLORS[colorIndex], comment: '' };
   state.npcs.push(npc);
   emitChange();
   return npc;
@@ -185,6 +185,16 @@ export function updateNPC(id, name) {
   const npc = state.npcs.find((n) => n.id === id);
   if (npc) {
     npc.name = name;
+    dirty = true;
+    updateStatus();
+    // Don't call emitChange to avoid re-render during typing
+  }
+}
+
+export function updateNPCComment(id, comment) {
+  const npc = state.npcs.find((n) => n.id === id);
+  if (npc) {
+    npc.comment = comment;
     dirty = true;
     updateStatus();
     // Don't call emitChange to avoid re-render during typing
@@ -236,7 +246,7 @@ export function reorderList(collection, fromIndex, toIndex) {
 // ─── QUEST CRUD ──────────────────────────────────────
 export function addQuest(name) {
   pushUndo();
-  const quest = { id: uid(), name };
+  const quest = { id: uid(), name, comment: '' };
   state.quests.push(quest);
   emitChange();
   return quest;
@@ -249,6 +259,16 @@ export function updateQuest(id, name) {
     quest.name = name;
     dirty = true;
     updateStatus();
+  }
+}
+
+export function updateQuestComment(id, comment) {
+  const quest = state.quests.find((q) => q.id === id);
+  if (quest) {
+    quest.comment = comment;
+    dirty = true;
+    updateStatus();
+    // Don't call emitChange to avoid re-render during typing
   }
 }
 
@@ -270,6 +290,7 @@ export function addDialogue(title, npcId, questId) {
     title,
     npcId: npcId || null,
     questId: questId || null,
+    comment: '',
     startNodeId,
     nodes: [
       {

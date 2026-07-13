@@ -22,12 +22,15 @@ function buildProjectContext() {
   const state = State.getState();
   const dlg = State.getActiveDialogue();
 
+  // Author notes explain nomenclature/timing the AI can't infer on its own
+  const note = (obj) => (obj.comment && obj.comment.trim() ? ` NOTE:"${obj.comment.trim().slice(0, 250)}"` : '');
+
   const npcsText = state.npcs.length > 0
-    ? state.npcs.map(n => `  [ID:${n.id}] "${n.name}" color:${n.color || 'default'}`).join('\n')
+    ? state.npcs.map(n => `  [ID:${n.id}] "${n.name}" color:${n.color || 'default'}${note(n)}`).join('\n')
     : '  (none)';
 
   const questsText = state.quests.length > 0
-    ? state.quests.map(q => `  [ID:${q.id}] "${q.name}"`).join('\n')
+    ? state.quests.map(q => `  [ID:${q.id}] "${q.name}"${note(q)}`).join('\n')
     : '  (none)';
 
   let activeDlgText;
@@ -51,7 +54,7 @@ function buildProjectContext() {
       return `    [ID:${n.id}] NPC:"${npc?.name || '-'}" ES:"${(n.text?.es || '').slice(0, textBudget)}" EN:"${(n.text?.en || '').slice(0, textBudget)}" → [${conns || 'no outgoing'}] ${flags}`;
     }).join('\n');
 
-    activeDlgText = `  Title:"${dlg.title}" [ID:${dlg.id}]
+    activeDlgText = `  Title:"${dlg.title}" [ID:${dlg.id}]${note(dlg)}
   Main NPC: ${dlgNpc?.name || 'none'}
   Nodes (${dlg.nodes.length}):
 ${nodesText || '    (empty)'}`;
@@ -59,7 +62,7 @@ ${nodesText || '    (empty)'}`;
 
   const otherDlgs = state.dialogues
     .filter(d => d.id !== dlg?.id)
-    .map(d => `  [ID:${d.id}] "${d.title}" (${d.nodes.length} nodes)`)
+    .map(d => `  [ID:${d.id}] "${d.title}" (${d.nodes.length} nodes)${note(d)}`)
     .join('\n') || '  (none)';
 
   return `NPCs (${state.npcs.length}):

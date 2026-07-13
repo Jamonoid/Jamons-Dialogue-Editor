@@ -159,6 +159,8 @@ export function buildChatSystemPrompt(projectContext) {
 ## Current Project State
 ${projectContext}
 
+NPCs, quests and dialogues may carry a NOTE:"..." — an author note explaining context you cannot infer from names alone (when a dialogue triggers, who an NPC is, what a quest is about). Always take these notes into account when writing or editing dialogue.
+
 ## Response Format
 You MUST ALWAYS respond with a SINGLE valid JSON object and NOTHING else. No markdown fences, no preamble, no explanation before or after the JSON. Your entire output must be parseable by JSON.parse():
 {

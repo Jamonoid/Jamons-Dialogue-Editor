@@ -485,25 +485,32 @@
           <span class="memmap-key" data-type="file" title="Mostrar/ocultar"><i style="background:#00b894"></i>Archivos</span>
           <span class="memmap-key" data-type="npc" title="Mostrar/ocultar"><i style="background:#fdcb6e"></i>NPCs</span>
           <span class="memmap-key" data-type="quest" title="Mostrar/ocultar"><i style="background:#e17055"></i>Quests</span>
+          <span class="memmap-key" data-type="dialogue" title="Mostrar/ocultar"><i style="background:#fd79a8"></i>Diálogos</span>
           <span class="memmap-key" data-type="chat" title="Mostrar/ocultar"><i style="background:#74b9ff"></i>Chat</span>
         </div>
         <span id="memmap-progress" class="memmap-progress"></span>
+        <div class="memmap-progressbar" id="memmap-progressbar" style="display:none"><div class="memmap-progressbar-fill" id="memmap-progressbar-fill"></div></div>
+        <div class="memmap-search">
+          <input type="text" id="memmap-search" placeholder="🔍 Probar búsqueda RAG (Enter)" title="Ejecuta la misma búsqueda semántica que usan el chat y la generación, y muestra qué recupera" />
+          <button class="btn btn-sm" id="memmap-search-clear" title="Limpiar búsqueda" style="display:none">✕</button>
+        </div>
         <label class="memmap-threshold" title="Similitud mínima para dibujar conexiones">
           Similitud
           <input type="range" id="memmap-threshold" min="0.5" max="0.95" step="0.05" value="0.75" />
           <span id="memmap-threshold-value">0.75</span>
         </label>
         <button class="btn btn-sm" id="memmap-rotate" title="Activar/pausar la rotación automática">⟳ Girar</button>
-        <span class="memmap-hint">Arrastrar = rotar · Shift/clic der. = mover · Rueda = zoom · Doble clic = centrar · Clic en nodo = ir al nodo</span>
+        <span class="memmap-hint">Arrastrar = rotar · Shift/clic der. = mover · Rueda = zoom · Clic en punto = detalles</span>
       </div>
 
       <div class="memmap-canvas-wrap">
         <canvas id="memmap-canvas"></canvas>
         <div id="memmap-tooltip" class="memmap-tooltip"></div>
+        <div id="memmap-detail" class="memmap-detail"></div>
         <div id="memmap-empty" class="memmap-empty">
           <div class="memmap-empty-icon">🧠</div>
           <h3>La memoria vectorial está vacía</h3>
-          <p>Indexa el proyecto para ver el mapa semántico de nodos, archivos de contexto, NPCs, quests e historial del chat.<br>El modelo de embeddings corre 100% local (primera vez descarga ~50 MB).</p>
+          <p>Indexa el proyecto para ver el mapa semántico de nodos, archivos de contexto, NPCs, quests e historial del chat.<br>El modelo de embeddings corre 100% local, en GPU si hay WebGPU (la primera vez se descarga: 50 MB–1 GB según el modelo).</p>
           <button class="btn btn-primary" id="memmap-index-now">⚡ Indexar proyecto</button>
         </div>
       </div>

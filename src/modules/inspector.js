@@ -112,6 +112,10 @@ function renderNPC(id) {
         </div>
       </div>
       <div class="field-group">
+        <label class="field-label">Nota del autor <span class="lang-hint">(contexto para la IA)</span></label>
+        <textarea class="field-textarea" id="insp-npc-comment" rows="3" placeholder="Ej: Herrero gruñón del pueblo, odia a los elfos, aparece en el acto 2...">${esc(npc.comment || '')}</textarea>
+      </div>
+      <div class="field-group">
         <label class="field-label">ID</label>
         <input class="field-input" value="${npc.id}" readonly style="opacity:0.5;cursor:default;">
       </div>
@@ -128,6 +132,17 @@ function renderNPC(id) {
     State.pushUndoCheckpoint();
   });
   $('#insp-npc-name').addEventListener('blur', () => {
+    State.notifyChange();
+  });
+  $('#insp-npc-comment').addEventListener('input', (e) => {
+    isEditing = true;
+    State.updateNPCComment(id, e.target.value);
+    isEditing = false;
+  });
+  $('#insp-npc-comment').addEventListener('focus', () => {
+    State.pushUndoCheckpoint();
+  });
+  $('#insp-npc-comment').addEventListener('blur', () => {
     State.notifyChange();
   });
   $('#insp-npc-color').addEventListener('focus', () => {
@@ -167,6 +182,10 @@ function renderQuest(id) {
         <input class="field-input" id="insp-quest-name" value="${esc(quest.name)}">
       </div>
       <div class="field-group">
+        <label class="field-label">Nota del autor <span class="lang-hint">(contexto para la IA)</span></label>
+        <textarea class="field-textarea" id="insp-quest-comment" rows="3" placeholder="Ej: Quest secundaria del acto 1, el jugador debe recuperar la espada robada...">${esc(quest.comment || '')}</textarea>
+      </div>
+      <div class="field-group">
         <label class="field-label">ID</label>
         <input class="field-input" value="${quest.id}" readonly style="opacity:0.5;cursor:default;">
       </div>
@@ -183,6 +202,17 @@ function renderQuest(id) {
     State.pushUndoCheckpoint();
   });
   $('#insp-quest-name').addEventListener('blur', () => {
+    State.notifyChange();
+  });
+  $('#insp-quest-comment').addEventListener('input', (e) => {
+    isEditing = true;
+    State.updateQuestComment(id, e.target.value);
+    isEditing = false;
+  });
+  $('#insp-quest-comment').addEventListener('focus', () => {
+    State.pushUndoCheckpoint();
+  });
+  $('#insp-quest-comment').addEventListener('blur', () => {
     State.notifyChange();
   });
   $('#insp-quest-delete').addEventListener('click', () => {
@@ -223,6 +253,10 @@ function renderDialogue(id) {
         </select>
       </div>
       <div class="field-group">
+        <label class="field-label">Nota del autor <span class="lang-hint">(contexto para la IA)</span></label>
+        <textarea class="field-textarea" id="insp-dlg-comment" rows="3" placeholder="Ej: Diálogo que se ejecuta al entregar la espada, al final de la quest...">${esc(dlg.comment || '')}</textarea>
+      </div>
+      <div class="field-group">
         <label class="field-label">Nodos</label>
         <span style="font-size:13px;color:var(--text-secondary)">${dlg.nodes.length} nodo${dlg.nodes.length !== 1 ? 's' : ''}</span>
       </div>
@@ -245,6 +279,17 @@ function renderDialogue(id) {
     State.pushUndoCheckpoint();
   });
   $('#insp-dlg-title').addEventListener('blur', () => {
+    State.notifyChange();
+  });
+  $('#insp-dlg-comment').addEventListener('input', (e) => {
+    isEditing = true;
+    State.updateDialogue(id, { comment: e.target.value });
+    isEditing = false;
+  });
+  $('#insp-dlg-comment').addEventListener('focus', () => {
+    State.pushUndoCheckpoint();
+  });
+  $('#insp-dlg-comment').addEventListener('blur', () => {
     State.notifyChange();
   });
   $('#insp-dlg-npc').addEventListener('change', (e) => {

@@ -309,7 +309,7 @@ async function getContextAndNpcs(query) {
   try {
     const VectorMemory = await import('./vector-memory.js');
     if (query && VectorMemory.isEnabled() && (await VectorMemory.hasIndex())) {
-      const hits = await VectorMemory.search(query, { k: 10, types: ['file', 'node', 'npc', 'quest'] });
+      const hits = await VectorMemory.search(query, { k: 10, types: ['file', 'node', 'npc', 'quest', 'dialogue'] });
       if (hits.length > 0) {
         const ragText = hits
           .map((h) => `[${h.typeLabel} · sim ${h.score.toFixed(2)}] ${h.text}`)
@@ -326,7 +326,9 @@ async function getContextAndNpcs(query) {
   }
 
   const allNpcs = State.getState().npcs || [];
-  const npcListText = allNpcs.length > 0 ? allNpcs.map((n) => `"${n.name}"`).join(', ') : 'Ninguno';
+  const npcListText = allNpcs.length > 0
+    ? allNpcs.map((n) => `"${n.name}"${n.comment && n.comment.trim() ? ` (${n.comment.trim().slice(0, 150)})` : ''}`).join(', ')
+    : 'Ninguno';
   return { contextBlock, npcListText };
 }
 
@@ -351,7 +353,11 @@ function parseAIResponse(result) {
 
 export async function generateDialogue(prompt, npcName, { minNodes = 5, maxNodes = 15 } = {}) {
   const { contextBlock, npcListText } = await getContextAndNpcs(prompt);
-  const systemPrompt = buildGenerateSystemPrompt(npcName, npcListText, contextBlock, minNodes, maxNodes);
+  const dlg = State.getActiveDialogue();
+  const noteBlock = dlg?.comment?.trim()
+    ? `\n\nAuthor note about this dialogue (when/where it happens): ${dlg.comment.trim()}`
+    : '';
+  const systemPrompt = buildGenerateSystemPrompt(npcName, npcListText, contextBlock + noteBlock, minNodes, maxNodes);
 
   const messages = [
     { role: 'system', content: systemPrompt },
@@ -387,7 +393,10 @@ export async function extendDialogue(prompt, npcName, { minNodes = 5, maxNodes =
 
   const leafIds = leafNodes.map((n) => `"${n.id}"`).join(', ');
 
-  const systemPrompt = buildExtendSystemPrompt(npcName, npcListText, contextBlock, existingSummary, leafIds, minNodes, maxNodes);
+  const noteBlock = dlg.comment && dlg.comment.trim()
+    ? `\n\nAuthor note about this dialogue (when/where it happens): ${dlg.comment.trim()}`
+    : '';
+  const systemPrompt = buildExtendSystemPrompt(npcName, npcListText, contextBlock + noteBlock, existingSummary, leafIds, minNodes, maxNodes);
 
   const messages = [
     { role: 'system', content: systemPrompt },

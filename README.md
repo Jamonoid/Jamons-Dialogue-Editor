@@ -18,6 +18,7 @@ Editor visual de árboles de diálogo construido para el desarrollo de videojueg
 - Gestión de NPCs, Quests y Diálogos desde una barra lateral.
 - Colores personalizados para NPCs para identificación visual en el canvas
 - Asignación de diálogos a NPCs y Quests
+- **Notas del autor**: cada NPC, quest y diálogo admite una nota de contexto (p. ej. "Diálogo que se ejecuta al final de la quest X") que se expone a la IA en el chat, la generación, la memoria vectorial (RAG) y las herramientas MCP
 - **Agrupar, ordenar y filtrar diálogos**: agrupa la lista por NPC o por Quest, ordena por orden manual o título (A→Z / Z→A) y filtra por texto (título, NPC o Quest). Las preferencias de agrupación y orden se recuerdan entre sesiones
 - Reordenamiento de la lista mediante arrastrar y soltar (en modo manual sin agrupar)
 - Guardar/cargar proyectos como archivos `.json` con auto-guardado en localStorage
@@ -41,10 +42,12 @@ Editor visual de árboles de diálogo construido para el desarrollo de videojueg
 - **Archivos de contexto**: Sube archivos PDF, Markdown o texto con lore del mundo. Con la memoria vectorial indexada, la IA recupera solo los fragmentos relevantes a cada petición (RAG); sin índice, se inyectan directamente en los prompts
 
 ### Memoria Vectorial y Mapa Neuronal
-- **Embeddings 100% locales** con transformers.js (descarga el modelo una vez, ~50 MB, luego funciona offline; sin API key). Modelo configurable en la Configuración de IA
+- **Embeddings 100% locales** con transformers.js — en GPU vía WebGPU cuando está disponible (fallback a CPU/WASM). El modelo se descarga una vez (50 MB–1 GB según cuál elijas) y luego funciona offline, sin API key. Modelo configurable en la Configuración de IA, con soporte específico para Qwen3-Embedding, familia E5 y BGE-M3 (pooling y prefijos correctos por modelo)
 - **Indexa todo el proyecto**: nodos de diálogo, archivos de contexto (troceados), NPCs, quests e historial del chat. Los vectores viven en IndexedDB, fuera del estado del proyecto
 - **RAG en chat y generación**: cada mensaje del chat y cada generación de diálogo recupera los fragmentos semánticamente más relevantes en lugar de volcar toda la documentación (menos tokens, mejores respuestas, documentación sin límite de tamaño)
-- **Mapa neuronal 3D** (botón 🧠 Memoria): visualización 3D de toda la memoria (proyección PCA a 3 componentes) con cámara orbital (arrastrar = rotar, Shift/clic derecho = mover, rueda = zoom), rotación automática, conexiones por similitud, filtros por tipo, tooltips y clic para navegar al nodo en el editor
+- **Mapa neuronal 3D** (botón 🧠 Memoria): visualización 3D de toda la memoria (proyección PCA a 3 componentes) con cámara orbital (arrastrar = rotar, Shift/clic derecho = mover, rueda = zoom), rotación automática, conexiones por similitud, filtros por tipo y tooltips. Clic en un punto abre un **panel de detalles** (texto completo, metadatos, vecinos más similares y botón para ir al nodo/diálogo en el editor)
+- **Prueba de calidad del RAG**: buscador integrado en el mapa que ejecuta la misma búsqueda semántica que usan el chat y la generación, mostrando los resultados rankeados con su similitud y resaltándolos en el espacio 3D
+- **Feedback de carga del modelo**: barra de progreso con MB descargados al bajar el modelo de embeddings, y indicador del backend activo (GPU/CPU) en el pie del mapa
 - **Indexación incremental**: la primera indexación es manual ("⚡ Indexar proyecto"); después se refresca sola en segundo plano al editar
 - El botón 🗑 del chat borra el historial y su memoria vectorial
 
@@ -143,13 +146,14 @@ Los proyectos se guardan como JSON con la siguiente estructura:
 
 ```json
 {
-  "npcs": [{ "id": "...", "name": "Guard", "color": "#6c5ce7" }],
-  "quests": [{ "id": "...", "name": "The Lost Sword" }],
+  "npcs": [{ "id": "...", "name": "Guard", "color": "#6c5ce7", "comment": "Guardia de la puerta norte" }],
+  "quests": [{ "id": "...", "name": "The Lost Sword", "comment": "Quest secundaria del acto 1" }],
   "dialogues": [{
     "id": "...",
     "title": "Guard Warning",
     "npcId": "...",
     "questId": "...",
+    "comment": "Se ejecuta la primera vez que el jugador cruza la puerta",
     "nodes": [{
       "id": "...",
       "text": { "es": "Hola viajero.", "en": "Hello traveler." },

@@ -218,10 +218,15 @@ export function showAISettingsModal(config, onSave) {
     'deepseek/deepseek-chat', 'meta-llama/llama-3.3-70b-instruct',
   ];
   const CLAUDE_MODELS = ['sonnet', 'opus', 'haiku'];
+  // Ordered by retrieval quality (multilingual/ES). Big models are practical
+  // thanks to WebGPU; on CPU-only machines the small ones are the safe picks.
   const EMB_MODELS = [
-    'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+    'onnx-community/Qwen3-Embedding-0.6B-ONNX',
+    'Xenova/multilingual-e5-large',
+    'Xenova/bge-m3',
+    'Xenova/multilingual-e5-base',
     'Xenova/multilingual-e5-small',
-    'Xenova/all-MiniLM-L6-v2',
+    'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
   ];
   const datalist = (id, values) =>
     `<datalist id="${id}">${values.map((v) => `<option value="${v}"></option>`).join('')}</datalist>`;
@@ -291,7 +296,7 @@ export function showAISettingsModal(config, onSave) {
           <input class="field-input" type="text" id="ai-embeddings-model" value="${config.embeddingsModel || ''}"
             placeholder="Xenova/paraphrase-multilingual-MiniLM-L12-v2" list="dl-emb-models" style="flex:1">
         </div>
-        <span class="field-hint">Modelo local que corre 100% en tu PC (se descarga una vez, ~50 MB; Claude no genera embeddings). Indexa nodos, archivos, NPCs y chat — visualízalo con el botón 🧠 Memoria de la barra.</span>
+        <span class="field-hint">Modelo local que corre 100% en tu PC — en GPU (WebGPU) si está disponible, con fallback a CPU. Se descarga una vez (50 MB–1 GB según el modelo; Claude no genera embeddings). Calidad: Qwen3 &gt; e5-large ≈ bge-m3 &gt; e5-base &gt; e5-small. Tras cambiar de modelo, pulsa "⚡ Reindexar" en 🧠 Memoria para migrar el índice.</span>
       </div>
 
       <div class="field-group">

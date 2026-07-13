@@ -46,6 +46,7 @@ function serializeDialogue(dlg) {
     id: dlg.id,
     title: dlg.title,
     npc: dlg.npcId ? (State.getNPC(dlg.npcId)?.name || null) : null,
+    comment: dlg.comment || null,
     startNodeId: dlg.startNodeId,
     nodeCount: dlg.nodes.length,
     nodes: dlg.nodes.map((n) => ({
@@ -80,12 +81,13 @@ const tools = {
     const state = State.getState();
     const activeId = State.getActiveDialogueId();
     return {
-      npcs: (state.npcs || []).map((n) => ({ id: n.id, name: n.name, color: n.color || null })),
-      quests: (state.quests || []).map((q) => ({ id: q.id, name: q.name })),
+      npcs: (state.npcs || []).map((n) => ({ id: n.id, name: n.name, color: n.color || null, comment: n.comment || null })),
+      quests: (state.quests || []).map((q) => ({ id: q.id, name: q.name, comment: q.comment || null })),
       dialogues: (state.dialogues || []).map((d) => ({
         id: d.id,
         title: d.title,
         npc: d.npcId ? (State.getNPC(d.npcId)?.name || null) : null,
+        comment: d.comment || null,
         nodeCount: d.nodes.length,
         isActive: d.id === activeId,
       })),
@@ -104,12 +106,13 @@ const tools = {
     return serializeDialogue(dlg);
   },
 
-  create_dialogue({ title, npc_name, quest_name }) {
+  create_dialogue({ title, npc_name, quest_name, comment }) {
     if (!title || !title.trim()) throw new Error('title is required');
     State.startBatch();
     const npc = npc_name ? findOrCreateNPC(npc_name) : null;
     const quest = quest_name ? findOrCreateQuest(quest_name) : null;
     const dlg = State.addDialogue(title.trim(), npc?.id || null, quest?.id || null);
+    if (comment && comment.trim()) State.updateDialogue(dlg.id, { comment: comment.trim() });
     State.endBatch();
     return {
       dialogueId: dlg.id,
@@ -210,6 +213,28 @@ const tools = {
     if (!_autoLayout) throw new Error('Auto-layout is not available');
     _autoLayout();
     return { done: true };
+  },
+
+  set_comment({ type, id, comment }) {
+    const text = (comment || '').trim();
+    const state = State.getState();
+    if (type === 'npc') {
+      const npc = (state.npcs || []).find((n) => n.id === id);
+      if (!npc) throw new Error(`NPC not found: ${id}`);
+      State.updateNPCComment(id, text);
+    } else if (type === 'quest') {
+      const quest = (state.quests || []).find((q) => q.id === id);
+      if (!quest) throw new Error(`Quest not found: ${id}`);
+      State.updateQuestComment(id, text);
+    } else if (type === 'dialogue') {
+      const dlg = (state.dialogues || []).find((d) => d.id === id);
+      if (!dlg) throw new Error(`Dialogue not found: ${id}`);
+      State.updateDialogue(id, { comment: text });
+    } else {
+      throw new Error(`Invalid type: ${type}. Use 'npc', 'quest' or 'dialogue'.`);
+    }
+    State.notifyChange();
+    return { type, id, comment: text };
   },
 };
 
