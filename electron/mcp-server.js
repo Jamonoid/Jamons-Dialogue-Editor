@@ -16,7 +16,7 @@ export const MCP_PORT = Number(process.env.DIALOGUE_FORGE_MCP_PORT) || 4747;
 
 /** Builds a fresh McpServer with all tools wired to `exec(toolName, args)`. */
 function buildServer(exec) {
-  const server = new McpServer({ name: 'dialogue-forge', version: '1.0.0' });
+  const server = new McpServer({ name: 'dialogue-forge', version: '1.1.0' });
 
   const register = (name, description, shape) => {
     server.registerTool(name, { description, inputSchema: shape }, async (args) => {

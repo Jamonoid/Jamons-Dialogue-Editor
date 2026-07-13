@@ -144,9 +144,12 @@ Register once (user scope, available from any repo) while Dialogue Forge is open
 claude mcp add --transport http --scope user dialogue-forge http://127.0.0.1:4747/mcp
 ```
 
-Tools (`src/modules/mcp-bridge.js`, all operate on the **active** dialogue unless noted):
-- **Read**: `get_project_summary`, `get_dialogue`
-- **Edit**: `create_dialogue`, `set_active_dialogue`, `add_node`, `update_node`, `connect_nodes`, `delete_node`, `set_start_node`, `create_npc`, `auto_layout`, `set_comment` (author note on an npc/quest/dialogue)
+Tools (`src/modules/mcp-bridge.js`). Every edit tool accepts an optional `dialogue_id` (defaults to the **active** dialogue) — no implicit-global-state failures when the active dialogue changes mid-session:
+- **Read**: `get_project_summary`, `get_dialogue` (`format`: `compact` default — nodes with empty fields omitted plus `edges` as `[from, to, label?]` tuples; also `structure` = ids/edges only and `full` = verbose legacy), `validate_dialogue` (unreachable nodes, broken connections, empty ES/EN texts, endings)
+- **Bulk write**: `write_dialogue_graph` — a whole tree (nodes + connections + start) in ONE call with caller temp ids (`"n1"`); returns `idMap` temp→real. With `title` it creates + activates a new dialogue; otherwise `mode: 'replace'` (default, rewrites the target) or `'append'`. The payload is validated before mutating (atomic) and the tree auto-layouts. **Preferred write path** — avoids the N×add_node + M×connect_nodes round-trips.
+- **Edit**: `create_dialogue`, `update_dialogue` (title/npc/quest/comment), `delete_dialogue` (requires explicit `dialogue_id`), `clear_dialogue` (leaves one empty start node), `set_active_dialogue`, `add_node` / `update_node` (both accept `condition`/`action` game-logic fields), `connect_nodes` (relabels if the connection already exists), `disconnect_nodes`, `delete_node`, `set_start_node`, `create_npc`, `auto_layout`, `set_comment` (author note on an npc/quest/dialogue)
+
+Implementation notes: node edits on non-active dialogues mutate state directly inside `startBatch()/endBatch()`. Batches **nest** via a depth counter in `state.js` (only the outermost batch pushes the undo checkpoint / emits the render), so `writeDialogueGraph` can run inside the chat executor's batch. `writeDialogueGraph`, `buildValidationReport` and `clearDialogueContent` are exported from `mcp-bridge.js` and reused by `chat.js`, so chat actions and MCP tools behave identically.
 
 The MCP server only responds while the app window is open; tool calls return `{ ok: false, error }` if the window is closed or the bridge hasn't loaded.
 
