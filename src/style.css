@@ -3069,8 +3069,9 @@ body {
   position: absolute;
   left: -1.5px;
   bottom: 100%;
-  min-width: calc(100% + 3px);
-  max-width: max-content;
+  /* Width divided by the counter-scale so the scaled bar stays EXACTLY as
+     wide as the box — only its height and typography grow when zoomed out. */
+  width: calc((100% + 3px) / var(--inv-zoom, 1));
   box-sizing: border-box;
   padding: 5px 10px;
   background: color-mix(in srgb, var(--comment-color, #94a2b3) 82%, #10131a);
