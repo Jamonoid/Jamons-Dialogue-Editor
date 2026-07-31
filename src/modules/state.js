@@ -39,6 +39,7 @@ let activeDialogueId = null;
 // View mode: 'dialogue' (edit active dialogue) | 'story' (global story map)
 let viewMode = localStorage.getItem('df_viewMode') === 'story' ? 'story' : 'dialogue';
 let selectedNodeIds = new Set();
+let selectedCommentId = null; // UE-style comment boxes: single selection
 let dirty = false;
 let currentFilePath = null;
 
@@ -142,6 +143,7 @@ export function setViewMode(mode) {
   if (mode === viewMode) return;
   viewMode = mode;
   selectedNodeIds.clear();
+  selectedCommentId = null;
   try { localStorage.setItem('df_viewMode', mode); } catch (e) {}
 }
 
@@ -162,6 +164,7 @@ export function getSelectedNodeId() {
 export function setSelectedNodeId(id) {
   selectedNodeIds.clear();
   if (id) selectedNodeIds.add(id);
+  if (id) selectedCommentId = null;
 }
 
 export function getSelectedNodeIds() {
@@ -186,11 +189,108 @@ export function toggleNodeSelection(id) {
 
 export function clearSelection() {
   selectedNodeIds.clear();
+  selectedCommentId = null;
+}
+
+// ─── COMMENT BOXES (UE Blueprint-style, per graph) ───
+/** Comments array of the active graph (created lazily — legacy graphs lack it). */
+function ensureComments(graph) {
+  if (graph && !Array.isArray(graph.comments)) graph.comments = [];
+  return graph ? graph.comments : [];
+}
+
+export function getComments() {
+  const g = getActiveGraph();
+  return g ? ensureComments(g) : [];
+}
+
+export function getComment(id) {
+  return getComments().find((c) => c.id === id) || null;
+}
+
+export function getSelectedCommentId() {
+  return selectedCommentId;
+}
+
+/** Select a comment box (clears node selection — UE behaves the same). */
+export function setSelectedCommentId(id) {
+  selectedCommentId = id || null;
+  if (id) selectedNodeIds.clear();
+}
+
+export function addComment({ x, y, width, height, text, color } = {}) {
+  const g = getActiveGraph();
+  if (!g) return null;
+  pushUndo();
+  const comment = {
+    id: uid(),
+    text: text ?? 'Comentario',
+    x: x ?? 200,
+    y: y ?? 200,
+    width: Math.max(160, width ?? 400),
+    height: Math.max(90, height ?? 260),
+    color: color || '#94a2b3',
+  };
+  ensureComments(g).push(comment);
+  selectedCommentId = comment.id;
+  selectedNodeIds.clear();
+  emitChange();
+  return comment;
+}
+
+export function updateCommentText(id, text) {
+  const c = getComment(id);
+  if (c) {
+    c.text = text;
+    dirty = true;
+    updateStatus();
+    // Silent (no re-render) — caller notifies on blur, same pattern as names
+  }
+}
+
+export function updateCommentColor(id, color) {
+  const c = getComment(id);
+  if (c) {
+    c.color = color;
+    dirty = true;
+    updateStatus();
+    // Silent — the color picker caller notifies on close
+  }
+}
+
+export function updateCommentPosition(id, x, y) {
+  const c = getComment(id);
+  if (c) {
+    c.x = x;
+    c.y = y;
+    dirty = true;
+    updateStatus();
+  }
+}
+
+export function updateCommentSize(id, width, height) {
+  const c = getComment(id);
+  if (c) {
+    c.width = Math.max(160, width);
+    c.height = Math.max(90, height);
+    dirty = true;
+    updateStatus();
+  }
+}
+
+export function deleteComment(id) {
+  const g = getActiveGraph();
+  if (!g) return;
+  pushUndo();
+  g.comments = ensureComments(g).filter((c) => c.id !== id);
+  if (selectedCommentId === id) selectedCommentId = null;
+  emitChange();
 }
 
 export function setActiveDialogueId(id) {
   activeDialogueId = id;
   selectedNodeIds.clear();
+  selectedCommentId = null;
   // Q16: Persist active dialogue for session restoration
   try { localStorage.setItem('df_activeDialogueId', id || ''); } catch (e) {}
 }

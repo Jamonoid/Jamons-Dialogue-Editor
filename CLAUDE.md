@@ -75,7 +75,8 @@ Nodes contain a `<textarea>` that allows direct inline text editing on the canva
       x, y, width, height,
       npcId,
       connections: [{ targetId: string, label: string }, ...]  // Normalized connection objects
-    }]
+    }],
+    comments: [{ id, text, x, y, width, height, color }]  // UE-style comment boxes (also on story)
   }],
   story: {              // Global story map ("Historia" view) — same graph shape as a dialogue
     id: 'story',        // fixed id (used as the camera-cache key)
@@ -126,6 +127,18 @@ When running in Electron, the app supports file-based persistence:
 - `localStorage` is always used as backup
 
 ### Canvas Interactions
+
+#### Mouse Controls (UE Blueprint-style)
+The canvas uses Unreal Engine Blueprint controls: **right-drag = pan**, **left-drag on empty canvas = selection marquee** (Shift = additive), **wheel = zoom**, **right-click without dragging = context menu**. A `panMoved` flag in `canvas.js` (read via `consumeRmbPan()`, also imported by `nodes.js`) suppresses every context menu that fires at the end of a right-button pan. Plain left-click on empty canvas deselects.
+
+#### Comment Boxes (UE Blueprint-style)
+Every graph (dialogues AND the story map) has a `comments: []` array — colored boxes rendered BEHIND nodes (`renderNodes()` prepends them; body is `pointer-events: none` so only the title bar and resize handle are interactive). Key mechanics:
+- **C key** (`main.js`): wraps the selected nodes in a new comment (bounding box + padding), or creates a default 400×260 box at the view center. Also canvas right-click → "💬 Agregar comentario aquí".
+- **Group movement** (`nodes.js`): dragging the title bar captures all nodes AND nested comments fully inside the box at drag start and moves them together (UE behaviour). Escape cancels and restores positions.
+- **Title editing**: double-click the title → inline `<input>` (Enter/blur commits, Escape reverts). Also editable from the inspector (`renderComment` in `inspector.js`, with free color picker).
+- **Colors**: right-click title → preset palette (`COMMENT_COLORS` in `nodes.js`); the box tint/border derive from `--comment-color` via `color-mix()`.
+- **Zoom bubble**: `applyTransform()` sets `--inv-zoom` (clamped 1–3.5) on `#nodes-layer`; titles counter-scale with it so they stay readable zoomed out.
+- Selection is single (`selectedCommentId` in `state.js`, cleared by node selection and vice versa); Delete removes the box only, never its nodes. CRUD: `addComment`, `updateCommentText/Color/Position/Size`, `deleteComment`, `getComments` — all on `getActiveGraph()`, arrays created lazily (`ensureComments`) so legacy saves need no migration.
 
 #### Camera Persistence (Q10)
 Camera position (pan offset + zoom) is saved per dialogue in a memory cache. When switching between dialogues, the camera restores to where you were last looking. This is in-memory only (resets on app restart).

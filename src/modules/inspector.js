@@ -64,6 +64,7 @@ export function render() {
   else if (type === 'quest') renderQuest(id);
   else if (type === 'dialogue') renderDialogue(id);
   else if (type === 'node') renderNode(id);
+  else if (type === 'comment') renderComment(id);
 }
 
 // ─── Multi-select Inspector ─────────────────────────
@@ -803,6 +804,75 @@ function renderStoryNode(nodeId) {
   });
   $('#insp-node-delete').addEventListener('click', () => {
     State.deleteNode(nodeId);
+    clear();
+  });
+}
+
+// ─── Comment Box Inspector (UE Blueprint-style) ──────
+function renderComment(commentId) {
+  const comment = State.getComment(commentId);
+  if (!comment) return clear();
+
+  const el = $('#inspector-content');
+  const color = comment.color || '#94a2b3';
+  el.innerHTML = `
+    <div class="inspector-header" style="border-left: 3px solid ${color};">
+      <div class="type-indicator" style="background: ${color}20; color: ${color}; border-color: ${color}40;">💬</div>
+      <h3>Comentario</h3>
+    </div>
+    <div class="inspector-body">
+      <div class="field-group">
+        <label class="field-label">Texto</label>
+        <textarea class="field-textarea" id="insp-comment-text" rows="3" placeholder="Describe esta zona del grafo...">${esc(comment.text || '')}</textarea>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Color</label>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <input type="color" id="insp-comment-color" value="${color}" style="width:40px;height:32px;border:none;background:none;cursor:pointer;padding:0;">
+          <span style="font-size:12px;color:var(--text-muted)" id="insp-comment-color-hex">${color}</span>
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Tamaño</label>
+        <span style="font-size:13px;color:var(--text-secondary)">${Math.round(comment.width)} × ${Math.round(comment.height)} px</span>
+      </div>
+      <p class="field-hint" style="margin-bottom:12px">Arrastra la barra de título para mover el comentario junto con los nodos que contiene. Doble clic en el título para editarlo en el lienzo.</p>
+      <button class="btn btn-danger btn-block" id="insp-comment-delete">Eliminar comentario</button>
+    </div>
+  `;
+
+  $('#insp-comment-text').addEventListener('focus', () => {
+    State.pushUndoCheckpoint();
+  });
+  $('#insp-comment-text').addEventListener('input', (e) => {
+    isEditing = true;
+    State.updateCommentText(commentId, e.target.value);
+    isEditing = false;
+    // Live-update the title bar on the canvas without a full re-render
+    const titleEl = document.querySelector(`.graph-comment-title[data-comment-title="${commentId}"]`);
+    if (titleEl && !titleEl.querySelector('input')) titleEl.textContent = e.target.value;
+  });
+  $('#insp-comment-text').addEventListener('blur', () => {
+    State.notifyChange();
+  });
+
+  $('#insp-comment-color').addEventListener('focus', () => {
+    State.pushUndoCheckpoint();
+  });
+  $('#insp-comment-color').addEventListener('input', (e) => {
+    // Silent update so the native color picker stays open; live-preview on canvas
+    State.updateCommentColor(commentId, e.target.value);
+    const hexLabel = $('#insp-comment-color-hex');
+    if (hexLabel) hexLabel.textContent = e.target.value;
+    const boxEl = document.querySelector(`.graph-comment[data-comment-id="${commentId}"]`);
+    if (boxEl) boxEl.style.setProperty('--comment-color', e.target.value);
+  });
+  $('#insp-comment-color').addEventListener('change', () => {
+    State.notifyChange();
+  });
+
+  $('#insp-comment-delete').addEventListener('click', () => {
+    State.deleteComment(commentId);
     clear();
   });
 }

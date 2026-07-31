@@ -12,8 +12,18 @@ import { showContextMenu, showModal, toast } from './ui.js';
 export let offset = { x: 0, y: 0 };
 export let zoom = 1;
 
+// UE-style controls: RIGHT-drag pans, LEFT-drag draws the selection marquee.
 let isPanning = false;
 let panStart = { x: 0, y: 0 };
+let panStartClient = { x: 0, y: 0 };
+let panMoved = false; // suppress the context menu that fires after a RMB pan
+
+/** True (once) if the right-button gesture that just ended was a pan, not a click. */
+export function consumeRmbPan() {
+  const moved = panMoved;
+  panMoved = false;
+  return moved;
+}
 
 // Snap-to-grid
 let snapEnabled = localStorage.getItem('dialogueForge_snap') === 'true';
@@ -41,12 +51,15 @@ function updateSnapUI() {
 // Selection rectangle
 let isSelecting = false;
 let selectionStart = { x: 0, y: 0 };
+let selectionAdditive = false; // Shift held → add to the current selection
 
 let onNodeSelectedCallback = null;
 let onCanvasClickCallback = null;
+let onCommentSelectedCallback = null;
 
 export function onNodeSelected(cb) { onNodeSelectedCallback = cb; }
 export function onCanvasClick(cb) { onCanvasClickCallback = cb; }
+export function onCommentSelected(cb) { onCommentSelectedCallback = cb; }
 
 // ─── RENDER ──────────────────────────────────────────
 export function render() {
@@ -96,7 +109,7 @@ export function render() {
   }
 
   // Story map with no nodes yet: keep controls + add button, show a hint
-  if (isStory && dlg.nodes.length === 0) {
+  if (isStory && dlg.nodes.length === 0 && !(dlg.comments || []).length) {
     nodesLayer.innerHTML = '';
     connectionsGroup.innerHTML = '';
     if (emptyTitle) emptyTitle.textContent = 'Mapa de historia vacío';
@@ -127,6 +140,9 @@ export function render() {
     onPositionChange: (nodeId, x, y) => {
       State.updateNodePosition(nodeId, x, y);
       renderConnections();
+    },
+    onCommentSelect: (commentId) => {
+      if (onCommentSelectedCallback) onCommentSelectedCallback(commentId);
     },
     offset,
     get zoom() { return zoom; },
@@ -266,6 +282,7 @@ export function renderConnections() {
     path.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (consumeRmbPan()) return; // RMB gesture was a pan, not a menu request
       const sourceId = path.dataset.source;
       const targetId = path.dataset.target;
       const menuItems = [];
@@ -317,6 +334,9 @@ export function applyTransform() {
   const gridBg = $('#grid-bg');
 
   nodesLayer.style.transform = `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`;
+  // UE-style comment bubbles: titles counter-scale when zoomed OUT so they
+  // stay readable as region labels (capped so they don't get absurd).
+  nodesLayer.style.setProperty('--inv-zoom', String(Math.max(1, Math.min(3.5, 1 / zoom))));
 
   const bgSize = GRID_SIZE * zoom;
   gridBg.style.backgroundSize = `${bgSize}px ${bgSize}px`;
@@ -337,44 +357,55 @@ export function setup() {
   const container = $('#canvas-container');
   registerGlobalHandlers();
 
-  // Pan / Selection rectangle
+  // UE Blueprint controls:
+  //   Right-drag  → pan the canvas
+  //   Left-drag   → selection marquee (Shift = add to selection)
+  //   Left-click  → deselect
+  //   Right-click → context menu (only if the mouse didn't move — no menu after a pan)
   container.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;
-    if (e.target.closest('.dialogue-node') || e.target.closest('.canvas-controls') || e.target.closest('.canvas-add-btn')) return;
-    if (e.target.classList && e.target.classList.contains('conn-hitarea')) return; // clicking a cable shouldn't pan (allows dblclick delete)
-    if (e.target.closest && e.target.closest('.conn-label')) return; // clicking a connection label shouldn't pan (allows click-to-edit)
+    const onWidget = e.target.closest('.dialogue-node') || e.target.closest('.canvas-controls') || e.target.closest('.canvas-add-btn')
+      || e.target.closest('.graph-comment-title') || e.target.closest('.graph-comment-resize');
 
-    if (e.shiftKey) {
-      // Shift+drag → selection rectangle
-      e.preventDefault(); // Prevent native text selection
-      isSelecting = true;
-      selectionStart = { x: e.clientX, y: e.clientY };
-      const rect = $('#selection-rect');
-      if (rect) {
-        rect.style.display = 'block';
-        rect.style.left = e.clientX - container.getBoundingClientRect().left + 'px';
-        rect.style.top = e.clientY - container.getBoundingClientRect().top + 'px';
-        rect.style.width = '0px';
-        rect.style.height = '0px';
-      }
+    // ── Right button → pan (from anywhere except nodes/comment bars/controls) ──
+    if (e.button === 2) {
+      if (onWidget) return;
+      e.preventDefault();
+      isPanning = true;
+      panMoved = false;
+      panStart.x = e.clientX - offset.x;
+      panStart.y = e.clientY - offset.y;
+      panStartClient = { x: e.clientX, y: e.clientY };
+      container.style.cursor = 'grabbing';
       return;
     }
 
-    // Normal click on canvas → pan + deselect
-    isPanning = true;
-    panStart.x = e.clientX - offset.x;
-    panStart.y = e.clientY - offset.y;
-    container.style.cursor = 'grabbing';
+    if (e.button !== 0) return;
+    if (onWidget) return;
+    if (e.target.classList && e.target.classList.contains('conn-hitarea')) return; // clicking a cable shouldn't select (allows dblclick delete)
+    if (e.target.closest && e.target.closest('.conn-label')) return; // clicking a connection label shouldn't select (allows click-to-edit)
 
-    State.clearSelection();
-    if (onCanvasClickCallback) onCanvasClickCallback();
-    render();
+    // ── Left button → selection marquee ──
+    e.preventDefault(); // Prevent native text selection
+    isSelecting = true;
+    selectionAdditive = e.shiftKey;
+    selectionStart = { x: e.clientX, y: e.clientY };
+    const rect = $('#selection-rect');
+    if (rect) {
+      rect.style.display = 'block';
+      rect.style.left = e.clientX - container.getBoundingClientRect().left + 'px';
+      rect.style.top = e.clientY - container.getBoundingClientRect().top + 'px';
+      rect.style.width = '0px';
+      rect.style.height = '0px';
+    }
   });
 
   document.addEventListener('mousemove', (e) => {
     if (isPanning) {
       offset.x = e.clientX - panStart.x;
       offset.y = e.clientY - panStart.y;
+      if (!panMoved && Math.hypot(e.clientX - panStartClient.x, e.clientY - panStartClient.y) > 4) {
+        panMoved = true;
+      }
       applyTransform();
       renderConnections();
     }
@@ -397,13 +428,13 @@ export function setup() {
   });
 
   document.addEventListener('mouseup', (e) => {
-    if (isPanning) {
+    if (isPanning && e.button === 2) {
       isPanning = false;
       const c = $('#canvas-container');
       if (c) c.style.cursor = '';
     }
 
-    if (isSelecting) {
+    if (isSelecting && e.button === 0) {
       isSelecting = false;
       const rect = $('#selection-rect');
       if (rect) rect.style.display = 'none';
@@ -415,10 +446,10 @@ export function setup() {
       const sw = Math.abs(e.clientX - selectionStart.x) / zoom;
       const sh = Math.abs(e.clientY - selectionStart.y) / zoom;
 
-      // Find nodes inside the rectangle
       const dlg = State.getActiveGraph();
       if (dlg && sw > 5 && sh > 5) {
-        State.clearSelection();
+        // Marquee → select nodes inside (Shift adds to the current selection)
+        if (!selectionAdditive) State.clearSelection();
         dlg.nodes.forEach((node) => {
           const nw = node.width || 240;
           const nh = node.height || 120;
@@ -431,6 +462,11 @@ export function setup() {
         if (onNodeSelectedCallback && State.getSelectedNodeId()) {
           onNodeSelectedCallback(State.getSelectedNodeId());
         }
+      } else {
+        // Plain click on empty canvas → deselect (UE behaviour)
+        State.clearSelection();
+        if (onCanvasClickCallback) onCanvasClickCallback();
+        render();
       }
     }
   });
@@ -450,12 +486,13 @@ export function setup() {
     renderConnections();
   }, { passive: false });
 
-  // Context menu on canvas background
+  // Context menu on canvas background (suppressed if the RMB gesture was a pan)
   container.addEventListener('contextmenu', (e) => {
     if (e.target.closest('.dialogue-node')) return;
-    // Don't block SVG connection right-click (handled in renderConnections)
-    if (e.target.closest('#canvas-svg')) return;
     e.preventDefault();
+    if (consumeRmbPan()) return; // the user was panning, not asking for a menu
+    // Cable right-clicks are handled by the path listeners in renderConnections
+    if (e.target.closest('#canvas-svg')) return;
     const containerRect = container.getBoundingClientRect();
     const nodeX = (e.clientX - containerRect.left - offset.x) / zoom;
     const nodeY = (e.clientY - containerRect.top - offset.y) / zoom;
@@ -471,6 +508,14 @@ export function setup() {
             render();
             if (onNodeSelectedCallback) onNodeSelectedCallback(node.id);
           }
+        },
+      },
+      {
+        label: '💬 Agregar comentario aquí',
+        action: 'add-comment',
+        handler: () => {
+          const comment = State.addComment({ x: nodeX, y: nodeY, width: 400, height: 260, text: 'Comentario' });
+          if (comment && onCommentSelectedCallback) onCommentSelectedCallback(comment.id);
         },
       },
       { label: 'Restablecer vista', action: 'reset', handler: () => resetView() },

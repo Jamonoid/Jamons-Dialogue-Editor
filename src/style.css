@@ -3048,3 +3048,87 @@ body {
   max-width: 460px;
   margin-bottom: 6px;
 }
+
+/* ═══ UE BLUEPRINT-STYLE COMMENT BOXES ═══════════════ */
+.graph-comment {
+  position: absolute;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--comment-color, #94a2b3) 13%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--comment-color, #94a2b3) 40%, transparent);
+  pointer-events: none; /* body is click-through: nodes inside stay interactive */
+  z-index: 0;
+}
+
+.graph-comment.selected {
+  border-color: var(--selection-color);
+  box-shadow: 0 0 0 2px var(--selection-color), 0 0 24px var(--selection-glow);
+}
+
+.graph-comment-title {
+  pointer-events: auto;
+  position: absolute;
+  left: -1.5px;
+  bottom: 100%;
+  min-width: calc(100% + 3px);
+  max-width: max-content;
+  box-sizing: border-box;
+  padding: 5px 10px;
+  background: color-mix(in srgb, var(--comment-color, #94a2b3) 82%, #10131a);
+  color: #f2f4f8;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+  border-radius: 5px 5px 0 0;
+  cursor: move;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* UE bubble: counter-scale when zoomed out so titles stay readable */
+  transform: scale(var(--inv-zoom, 1));
+  transform-origin: left bottom;
+}
+
+.graph-comment.selected .graph-comment-title {
+  background: color-mix(in srgb, var(--selection-color) 30%, color-mix(in srgb, var(--comment-color, #94a2b3) 75%, #10131a));
+}
+
+.graph-comment-title-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.35);
+  border: none;
+  outline: none;
+  color: inherit;
+  font: inherit;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+
+.graph-comment-resize {
+  pointer-events: auto;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.graph-comment-resize::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid color-mix(in srgb, var(--comment-color, #94a2b3) 80%, #fff);
+  border-bottom: 2px solid color-mix(in srgb, var(--comment-color, #94a2b3) 80%, #fff);
+  border-radius: 1px;
+}
+
+.graph-comment:hover .graph-comment-resize,
+.graph-comment.selected .graph-comment-resize {
+  opacity: 1;
+}

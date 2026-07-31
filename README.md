@@ -8,11 +8,21 @@ Editor visual de árboles de diálogo construido para desarrollo de videojuegos.
 
 ### Editor Visual de Diálogos
 - Canvas basado en nodos para crear y conectar líneas de diálogo
+- **Controles estilo Unreal Engine**: arrastre con clic derecho = mover la vista, arrastre con clic izquierdo = rectángulo de selección (Shift añade a la selección), rueda = zoom, clic derecho sin arrastrar = menú contextual
 - Posicionamiento de nodos con arrastrar y soltar, con auto-layout para árboles ramificados
 - Edición de texto inline en el canvas o en el panel inspector
 - Ramificación condicional con condiciones `IF` y acciones `DO` en las conexiones (Solo visual)
 - Multi-selección, duplicación y eliminación en lote de nodos
 - Historial completo de deshacer/rehacer (Ctrl+Z / Ctrl+Y)
+
+### Comentarios estilo Unreal Blueprints
+- **Cajas de comentario** de colores detrás de los nodos para agrupar y documentar zonas del grafo, en ambas vistas (Diálogo e Historia)
+- **Tecla C**: envuelve los nodos seleccionados en un comentario (o crea uno vacío en el centro de la vista); también disponible con clic derecho → "💬 Agregar comentario aquí"
+- **Movimiento de grupo**: arrastrar la barra de título mueve la caja y todos los nodos (y comentarios anidados) completamente contenidos en ella
+- Doble clic en el título para editar el texto inline; redimensionable desde la esquina inferior derecha
+- **Color por comentario**: presets en el menú contextual (clic derecho en el título) o selector libre en el inspector
+- Los títulos se agrandan al alejar el zoom (como en UE) para funcionar como etiquetas de región legibles
+- Delete elimina la caja seleccionada (los nodos que contiene no se tocan); todo es deshacible y se guarda con el proyecto
 
 ### Mapa de Historia (🗺 Historia)
 - Segunda vista del canvas (pestañas **🗨 Diálogo | 🗺 Historia** sobre el lienzo) para estructurar la historia completa como un grafo de quests
@@ -117,8 +127,11 @@ npm install
 | Ctrl+Y | Rehacer |
 | Ctrl+D | Duplicar nodos seleccionados |
 | Ctrl+A | Seleccionar todos los nodos |
-| Delete | Eliminar nodos seleccionados |
+| C | Crear comentario (envuelve la selección) |
+| Delete | Eliminar nodos o comentario seleccionados |
 | Escape | Deseleccionar / cerrar overlay |
+| Clic der. + arrastrar | Mover la vista (paneo) |
+| Clic izq. + arrastrar | Rectángulo de selección (Shift añade) |
 | Espacio | Reproducir/pausar (en Audio Slicer) |
 
 ## Estructura del Proyecto
@@ -176,7 +189,8 @@ Los proyectos se guardan como JSON con la siguiente estructura:
       "x": 100, "y": 200,
       "connections": [{ "targetId": "...", "condition": "", "action": "" }]
     }],
-    "startNodeId": "..."
+    "startNodeId": "...",
+    "comments": [{ "id": "...", "text": "Rama del tutorial", "x": 60, "y": 40, "width": 400, "height": 260, "color": "#94a2b3" }]
   }],
   "story": {
     "id": "story",

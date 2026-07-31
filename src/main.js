@@ -77,6 +77,7 @@ document.addEventListener('df-open-dialogue', (e) => {
 });
 
 Canvas.onNodeSelected((nodeId) => Inspector.show('node', nodeId));
+Canvas.onCommentSelected((commentId) => Inspector.show('comment', commentId));
 Canvas.onCanvasClick(() => Inspector.clear());
 
 document.addEventListener('langchange', () => {
@@ -227,21 +228,68 @@ function setupKeyboard() {
       }
     }
 
-    // Delete / Backspace → delete all selected nodes
-    if ((e.key === 'Delete' || (e.key === 'Backspace' && !isInput)) && State.getSelectedNodeIds().size > 0 && !isInput) {
-      e.preventDefault();
-      const ids = [...State.getSelectedNodeIds()];
-      State.startBatch();
-      ids.forEach((id) => State.deleteNode(id));
-      State.endBatch();
-      Inspector.clear();
+    // C → UE-style comment box: wrap the selected nodes, or create one at the view center
+    if ((e.key === 'c' || e.key === 'C') && !e.ctrlKey && !e.altKey && !e.metaKey && !isInput) {
+      const graph = State.getActiveGraph();
+      if (graph) {
+        e.preventDefault();
+        const selectedIds = [...State.getSelectedNodeIds()];
+        if (selectedIds.length > 0) {
+          // Bounding box of the selection + UE-like padding (extra room on top for the title)
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          selectedIds.forEach((id) => {
+            const n = graph.nodes.find((nn) => nn.id === id);
+            if (!n) return;
+            const el = document.querySelector(`.dialogue-node[data-node-id="${id}"]`);
+            const nw = n.width || 240;
+            const nh = n.height || (el ? el.offsetHeight / Canvas.zoom : 140);
+            minX = Math.min(minX, n.x);
+            minY = Math.min(minY, n.y);
+            maxX = Math.max(maxX, n.x + nw);
+            maxY = Math.max(maxY, n.y + nh);
+          });
+          if (minX !== Infinity) {
+            State.addComment({
+              x: minX - 30,
+              y: minY - 56,
+              width: (maxX - minX) + 60,
+              height: (maxY - minY) + 86,
+              text: 'Comentario',
+            });
+          }
+        } else {
+          // No selection → default-sized box at the center of the view
+          const rect = $('#canvas-container').getBoundingClientRect();
+          const cx = (rect.width / 2 - Canvas.offset.x) / Canvas.zoom;
+          const cy = (rect.height / 2 - Canvas.offset.y) / Canvas.zoom;
+          State.addComment({ x: cx - 200, y: cy - 130, width: 400, height: 260, text: 'Comentario' });
+        }
+        const newId = State.getSelectedCommentId();
+        if (newId) Inspector.show('comment', newId);
+      }
+    }
+
+    // Delete / Backspace → delete all selected nodes (or the selected comment box)
+    if ((e.key === 'Delete' || (e.key === 'Backspace' && !isInput)) && !isInput) {
+      if (State.getSelectedNodeIds().size > 0) {
+        e.preventDefault();
+        const ids = [...State.getSelectedNodeIds()];
+        State.startBatch();
+        ids.forEach((id) => State.deleteNode(id));
+        State.endBatch();
+        Inspector.clear();
+      } else if (State.getSelectedCommentId()) {
+        e.preventDefault();
+        State.deleteComment(State.getSelectedCommentId());
+        Inspector.clear();
+      }
     }
 
     // Escape → close overlays, deselect all
     if (e.key === 'Escape') {
       $('#modal-overlay').classList.remove('active');
       hideContextMenu();
-      if (State.getSelectedNodeIds().size > 0) {
+      if (State.getSelectedNodeIds().size > 0 || State.getSelectedCommentId()) {
         State.clearSelection();
         Inspector.clear();
         Canvas.render();

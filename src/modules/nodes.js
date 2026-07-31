@@ -8,7 +8,7 @@ import { t, tPlaceholder, getLang, setText } from './lang.js';
 import { showContextMenu, toast } from './ui.js';
 import * as State from './state.js';
 import { normalizeConnection } from './state.js';
-import { isSnapEnabled } from './canvas.js';
+import { isSnapEnabled, consumeRmbPan } from './canvas.js';
 
 // ─── Persistent drag/connection state (survives re-renders) ──
 let draggingNodeId = null;
@@ -25,6 +25,26 @@ let snapCandidates = []; // conectores válidos como destino (cacheados al inici
 let resizingNodeId = null;
 let resizeStart = { x: 0, y: 0, width: 0, height: 0 };
 
+// UE-style comment box state
+let draggingCommentId = null;
+let commentDragOffset = { x: 0, y: 0 };
+let commentStartPos = { x: 0, y: 0 };
+let commentContainedNodes = {};    // nodeId → start pos (group movement)
+let commentContainedComments = {}; // nested commentId → start pos
+let resizingCommentId = null;
+let commentResizeStart = { x: 0, y: 0, width: 0, height: 0 };
+
+// UE comment palette (context menu presets; free color via inspector)
+export const COMMENT_COLORS = [
+  { name: 'Gris', value: '#94a2b3' },
+  { name: 'Rojo', value: '#e06c75' },
+  { name: 'Naranja', value: '#e5934a' },
+  { name: 'Amarillo', value: '#e5c07b' },
+  { name: 'Verde', value: '#98c379' },
+  { name: 'Azul', value: '#61afef' },
+  { name: 'Violeta', value: '#c678dd' },
+];
+
 // Store current callbacks & context
 let activeCallbacks = null;
 let activeDlg = null;
@@ -34,7 +54,21 @@ export function renderNodes(dlg, container) {
   const lang = getLang();
   const isStory = dlg.id === 'story';
 
-  container.innerHTML = dlg.nodes
+  // UE-style comment boxes — rendered FIRST so they sit behind the nodes.
+  // The box body is click-through (pointer-events: none); only the title bar
+  // and the resize handle are interactive.
+  const selectedCommentId = State.getSelectedCommentId();
+  const commentsHtml = (dlg.comments || [])
+    .map((c) => `
+      <div class="graph-comment ${selectedCommentId === c.id ? 'selected' : ''}"
+           data-comment-id="${c.id}"
+           style="left: ${c.x}px; top: ${c.y}px; width: ${c.width}px; height: ${c.height}px; --comment-color: ${c.color || '#94a2b3'};">
+        <div class="graph-comment-title" data-comment-title="${c.id}" title="Arrastrar: mover comentario y nodos contenidos · Doble clic: editar texto">${esc(c.text || '')}</div>
+        <div class="graph-comment-resize" data-comment-resize="${c.id}" title="Redimensionar"></div>
+      </div>`)
+    .join('');
+
+  container.innerHTML = commentsHtml + dlg.nodes
     .map((node) => {
       const isStart = node.id === dlg.startNodeId;
       const isSelected = State.isNodeSelected(node.id);
@@ -173,6 +207,7 @@ export function setupNodeInteractions(dlg, callbacks) {
     nodeEl.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (consumeRmbPan()) return; // RMB gesture was a canvas pan that ended here
       const isStart = dlg.startNodeId === nodeId;
 
       showContextMenu(e.clientX, e.clientY, [
@@ -247,6 +282,119 @@ export function setupNodeInteractions(dlg, callbacks) {
     });
   });
 
+  // ── UE-style comment boxes ──
+  $$('.graph-comment-title').forEach((titleEl) => {
+    const commentId = titleEl.dataset.commentTitle;
+
+    // Drag by the title bar → move box + everything fully inside it (UE group movement)
+    titleEl.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (titleEl.querySelector('input')) return; // editing in place
+      e.stopPropagation();
+      e.preventDefault();
+      const comment = (dlg.comments || []).find((c) => c.id === commentId);
+      if (!comment) return;
+
+      // Select (DOM-level, no re-render — the drag must survive)
+      State.setSelectedCommentId(commentId);
+      document.querySelectorAll('.dialogue-node.selected').forEach((el) => el.classList.remove('selected'));
+      document.querySelectorAll('.graph-comment.selected').forEach((el) => el.classList.remove('selected'));
+      titleEl.parentElement.classList.add('selected');
+
+      const currentZoom = activeCallbacks.zoom;
+      State.pushUndoCheckpoint();
+      draggingCommentId = commentId;
+      commentDragOffset.x = (e.clientX - offset.x) / currentZoom - comment.x;
+      commentDragOffset.y = (e.clientY - offset.y) / currentZoom - comment.y;
+      commentStartPos = { x: comment.x, y: comment.y };
+
+      // Capture nodes fully inside the box at drag start (like UE)
+      commentContainedNodes = {};
+      dlg.nodes.forEach((n) => {
+        const el = $(`.dialogue-node[data-node-id="${n.id}"]`);
+        const nw = n.width || 240;
+        const nh = n.height || (el ? el.offsetHeight / currentZoom : 120);
+        if (
+          n.x >= comment.x && n.y >= comment.y &&
+          n.x + nw <= comment.x + comment.width &&
+          n.y + nh <= comment.y + comment.height
+        ) {
+          commentContainedNodes[n.id] = { x: n.x, y: n.y };
+        }
+      });
+      // Nested comment boxes fully inside also move along
+      commentContainedComments = {};
+      (dlg.comments || []).forEach((c2) => {
+        if (
+          c2.id !== commentId &&
+          c2.x >= comment.x && c2.y >= comment.y &&
+          c2.x + c2.width <= comment.x + comment.width &&
+          c2.y + c2.height <= comment.y + comment.height
+        ) {
+          commentContainedComments[c2.id] = { x: c2.x, y: c2.y };
+        }
+      });
+
+      if (activeCallbacks.onCommentSelect) activeCallbacks.onCommentSelect(commentId);
+    });
+
+    // Double click → edit the title inline
+    titleEl.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      startCommentTitleEdit(titleEl, commentId);
+    });
+
+    // Right click → comment menu (edit / color presets / delete)
+    titleEl.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (consumeRmbPan()) return; // RMB gesture was a canvas pan that ended here
+      showContextMenu(e.clientX, e.clientY, [
+        {
+          label: 'Editar texto',
+          action: 'edit-comment',
+          handler: () => {
+            const t = document.querySelector(`.graph-comment-title[data-comment-title="${commentId}"]`);
+            if (t) startCommentTitleEdit(t, commentId);
+          },
+        },
+        { divider: true },
+        ...COMMENT_COLORS.map((c) => ({
+          label: `<span style="color:${c.value}">●</span> ${c.name}`,
+          action: `color-${c.value.slice(1)}`,
+          handler: () => {
+            State.pushUndoCheckpoint();
+            State.updateCommentColor(commentId, c.value);
+            State.notifyChange();
+          },
+        })),
+        { divider: true },
+        {
+          label: 'Eliminar comentario',
+          action: 'delete-comment',
+          danger: true,
+          handler: () => State.deleteComment(commentId),
+        },
+      ]);
+    });
+  });
+
+  // Resize handle (bottom-right corner, like nodes)
+  $$('.graph-comment-resize').forEach((handle) => {
+    handle.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const commentId = handle.dataset.commentResize;
+      const comment = (dlg.comments || []).find((c) => c.id === commentId);
+      if (!comment) return;
+      State.pushUndoCheckpoint();
+      resizingCommentId = commentId;
+      commentResizeStart = { x: e.clientX, y: e.clientY, width: comment.width, height: comment.height };
+    });
+  });
+
   $$('.node-inline-text').forEach((textarea) => {
     const nodeId = textarea.dataset.textNode;
 
@@ -284,6 +432,29 @@ export function setupNodeInteractions(dlg, callbacks) {
 function autoResizeTextarea(textarea) {
   textarea.style.height = 'auto';
   textarea.style.height = textarea.scrollHeight + 'px';
+}
+
+// ─── COMMENT TITLE INLINE EDIT ───────────────────────
+function startCommentTitleEdit(titleEl, commentId) {
+  const comment = State.getComment(commentId);
+  if (!comment) return;
+  if (titleEl.querySelector('input')) return;
+  State.pushUndoCheckpoint();
+  const original = comment.text || '';
+  titleEl.innerHTML = `<input class="graph-comment-title-input" type="text" value="${esc(original)}" spellcheck="false">`;
+  const input = titleEl.querySelector('input');
+  input.focus();
+  input.select();
+  input.addEventListener('mousedown', (ev) => ev.stopPropagation());
+  input.addEventListener('keydown', (ev) => {
+    ev.stopPropagation(); // keep global shortcuts (C, Delete...) out of the way
+    if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+    else if (ev.key === 'Escape') { input.value = original; input.blur(); }
+  });
+  input.addEventListener('blur', () => {
+    State.updateCommentText(commentId, input.value.trim() || 'Comentario');
+    State.notifyChange();
+  });
 }
 
 // ─── GLOBAL MOUSE HANDLERS (registered once) ─────────
@@ -384,6 +555,68 @@ export function registerGlobalHandlers() {
       tempLine.setAttribute('d', d);
     }
 
+    // Dragging a comment box → move it + everything captured inside (UE group movement)
+    if (draggingCommentId && activeDlg) {
+      const comment = (activeDlg.comments || []).find((c) => c.id === draggingCommentId);
+      if (comment) {
+        let newX = (e.clientX - offset.x) / zoom - commentDragOffset.x;
+        let newY = (e.clientY - offset.y) / zoom - commentDragOffset.y;
+        if (typeof isSnapEnabled === 'function' ? isSnapEnabled() : false) {
+          newX = Math.round(newX / 24) * 24;
+          newY = Math.round(newY / 24) * 24;
+        }
+        const dx = newX - commentStartPos.x;
+        const dy = newY - commentStartPos.y;
+        comment.x = newX;
+        comment.y = newY;
+        const boxEl = $(`.graph-comment[data-comment-id="${draggingCommentId}"]`);
+        if (boxEl) { boxEl.style.left = newX + 'px'; boxEl.style.top = newY + 'px'; }
+
+        Object.entries(commentContainedNodes).forEach(([id, sp]) => {
+          const n = activeDlg.nodes.find((nn) => nn.id === id);
+          if (n) {
+            n.x = sp.x + dx;
+            n.y = sp.y + dy;
+            const el = $(`.dialogue-node[data-node-id="${id}"]`);
+            if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; }
+          }
+        });
+        Object.entries(commentContainedComments).forEach(([id, sp]) => {
+          const c2 = (activeDlg.comments || []).find((cc) => cc.id === id);
+          if (c2) {
+            c2.x = sp.x + dx;
+            c2.y = sp.y + dy;
+            const el = $(`.graph-comment[data-comment-id="${id}"]`);
+            if (el) { el.style.left = c2.x + 'px'; el.style.top = c2.y + 'px'; }
+          }
+        });
+
+        // Refresh the cables of the moved nodes
+        const containedIds = Object.keys(commentContainedNodes);
+        if (containedIds.length && onPositionChange) {
+          const n = activeDlg.nodes.find((nn) => nn.id === containedIds[0]);
+          if (n) onPositionChange(containedIds[0], n.x, n.y);
+        }
+      }
+    }
+
+    // Resizing a comment box
+    if (resizingCommentId && activeDlg && activeCallbacks) {
+      const comment = (activeDlg.comments || []).find((c) => c.id === resizingCommentId);
+      if (comment) {
+        const zoomFactor = activeCallbacks.zoom;
+        const dx = (e.clientX - commentResizeStart.x) / zoomFactor;
+        const dy = (e.clientY - commentResizeStart.y) / zoomFactor;
+        comment.width = Math.max(160, commentResizeStart.width + dx);
+        comment.height = Math.max(90, commentResizeStart.height + dy);
+        const boxEl = $(`.graph-comment[data-comment-id="${resizingCommentId}"]`);
+        if (boxEl) {
+          boxEl.style.width = comment.width + 'px';
+          boxEl.style.height = comment.height + 'px';
+        }
+      }
+    }
+
     // Resizing node
     if (resizingNodeId && activeDlg && activeCallbacks) {
       const node = activeDlg.nodes.find((n) => n.id === resizingNodeId);
@@ -424,6 +657,26 @@ export function registerGlobalHandlers() {
         State.updateNodeSize(resizingNodeId, node.width, node.height);
       }
       resizingNodeId = null;
+    }
+    if (draggingCommentId && activeDlg) {
+      const comment = (activeDlg.comments || []).find((c) => c.id === draggingCommentId);
+      if (comment) State.updateCommentPosition(comment.id, comment.x, comment.y);
+      Object.keys(commentContainedNodes).forEach((id) => {
+        const n = activeDlg.nodes.find((nn) => nn.id === id);
+        if (n) State.updateNodePosition(id, n.x, n.y);
+      });
+      Object.keys(commentContainedComments).forEach((id) => {
+        const c2 = (activeDlg.comments || []).find((cc) => cc.id === id);
+        if (c2) State.updateCommentPosition(id, c2.x, c2.y);
+      });
+      draggingCommentId = null;
+      commentContainedNodes = {};
+      commentContainedComments = {};
+    }
+    if (resizingCommentId && activeDlg) {
+      const comment = (activeDlg.comments || []).find((c) => c.id === resizingCommentId);
+      if (comment) State.updateCommentSize(resizingCommentId, comment.width, comment.height);
+      resizingCommentId = null;
     }
     if (isDrawing && drawFromNodeId) {
       // Priority 1: magnetically snapped connector
@@ -506,6 +759,43 @@ export function registerGlobalHandlers() {
       }
       draggingNodeId = null;
       dragStartPositions = {};
+    }
+
+    if (draggingCommentId && activeDlg) {
+      // Cancel comment drag: restore box + contained nodes/comments
+      const comment = (activeDlg.comments || []).find((c) => c.id === draggingCommentId);
+      if (comment) {
+        comment.x = commentStartPos.x;
+        comment.y = commentStartPos.y;
+        const boxEl = $(`.graph-comment[data-comment-id="${draggingCommentId}"]`);
+        if (boxEl) { boxEl.style.left = comment.x + 'px'; boxEl.style.top = comment.y + 'px'; }
+      }
+      Object.entries(commentContainedNodes).forEach(([id, sp]) => {
+        const n = activeDlg.nodes.find((nn) => nn.id === id);
+        if (n) {
+          n.x = sp.x;
+          n.y = sp.y;
+          const el = $(`.dialogue-node[data-node-id="${id}"]`);
+          if (el) { el.style.left = sp.x + 'px'; el.style.top = sp.y + 'px'; }
+        }
+      });
+      Object.entries(commentContainedComments).forEach(([id, sp]) => {
+        const c2 = (activeDlg.comments || []).find((cc) => cc.id === id);
+        if (c2) {
+          c2.x = sp.x;
+          c2.y = sp.y;
+          const el = $(`.graph-comment[data-comment-id="${id}"]`);
+          if (el) { el.style.left = sp.x + 'px'; el.style.top = sp.y + 'px'; }
+        }
+      });
+      const containedIds = Object.keys(commentContainedNodes);
+      if (containedIds.length && activeCallbacks && activeCallbacks.onPositionChange) {
+        const n = activeDlg.nodes.find((nn) => nn.id === containedIds[0]);
+        if (n) activeCallbacks.onPositionChange(containedIds[0], n.x, n.y);
+      }
+      draggingCommentId = null;
+      commentContainedNodes = {};
+      commentContainedComments = {};
     }
   });
 }
