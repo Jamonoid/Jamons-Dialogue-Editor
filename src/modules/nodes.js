@@ -8,7 +8,18 @@ import { t, tPlaceholder, getLang, setText } from './lang.js';
 import { showContextMenu, toast } from './ui.js';
 import * as State from './state.js';
 import { normalizeConnection } from './state.js';
-import { isSnapEnabled, consumeRmbPan } from './canvas.js';
+import { isSnapEnabled, consumeRmbPan, syncSelectionVisuals } from './canvas.js';
+
+/**
+ * Blur any focused inline textarea. Interactions that end up mutating the
+ * graph (drawing cables, dragging comments) must call this first: their
+ * preventDefault() keeps the focus alive, and a focused textarea makes the
+ * canvas skip full re-renders — new nodes would never reach the DOM.
+ */
+function blurNodeText() {
+  const t = document.querySelector('.node-inline-text:focus');
+  if (t) t.blur();
+}
 
 // ─── Persistent drag/connection state (survives re-renders) ──
 let draggingNodeId = null;
@@ -141,8 +152,12 @@ export function renderNodes(dlg, container) {
     })
     .join('');
 
-  // Auto-resize all inline textareas
-  container.querySelectorAll('.node-inline-text').forEach(autoResizeTextarea);
+  // Auto-resize all inline textareas — batched (all writes, then all reads,
+  // then all writes) to avoid one forced reflow per textarea
+  const areas = [...container.querySelectorAll('.node-inline-text')];
+  areas.forEach((a) => { a.style.height = 'auto'; });
+  const heights = areas.map((a) => a.scrollHeight);
+  areas.forEach((a, i) => { a.style.height = heights[i] + 'px'; });
 }
 
 // ─── NODE INTERACTIONS ───────────────────────────────
@@ -170,8 +185,9 @@ export function setupNodeInteractions(dlg, callbacks) {
       // Shift+click → toggle in multi-selection (don't call onSelect which resets)
       if (e.shiftKey) {
         State.toggleNodeSelection(nodeId);
-        // Re-render without resetting selection
+        // Re-render without resetting selection; main.js syncs the inspector
         if (activeCallbacks && activeCallbacks.onRender) activeCallbacks.onRender();
+        document.dispatchEvent(new CustomEvent('df-selection-changed'));
         return;
       }
 
@@ -247,6 +263,7 @@ export function setupNodeInteractions(dlg, callbacks) {
       if (e.button !== 0) return;
       e.stopPropagation();
       e.preventDefault();
+      blurNodeText(); // the drop may create a node — a focused textarea would block its render
       startDraw(conn.dataset.outputNode, 'out');
     });
   });
@@ -256,6 +273,7 @@ export function setupNodeInteractions(dlg, callbacks) {
       if (e.button !== 0) return;
       e.stopPropagation();
       e.preventDefault();
+      blurNodeText(); // the drop may create a node — a focused textarea would block its render
       startDraw(conn.dataset.inputNode, 'in');
     });
   });
@@ -292,14 +310,15 @@ export function setupNodeInteractions(dlg, callbacks) {
       if (titleEl.querySelector('input')) return; // editing in place
       e.stopPropagation();
       e.preventDefault();
+      blurNodeText(); // preventDefault keeps textarea focus alive otherwise
       const comment = (dlg.comments || []).find((c) => c.id === commentId);
       if (!comment) return;
 
-      // Select (DOM-level, no re-render — the drag must survive)
+      // Select (DOM-level sync, no re-render — the drag must survive).
+      // syncSelectionVisuals also restores the NPC border color of any
+      // node that just lost its selection ring.
       State.setSelectedCommentId(commentId);
-      document.querySelectorAll('.dialogue-node.selected').forEach((el) => el.classList.remove('selected'));
-      document.querySelectorAll('.graph-comment.selected').forEach((el) => el.classList.remove('selected'));
-      titleEl.parentElement.classList.add('selected');
+      syncSelectionVisuals(dlg);
 
       const currentZoom = activeCallbacks.zoom;
       State.pushUndoCheckpoint();
@@ -386,6 +405,7 @@ export function setupNodeInteractions(dlg, callbacks) {
       if (e.button !== 0) return;
       e.stopPropagation();
       e.preventDefault();
+      blurNodeText();
       const commentId = handle.dataset.commentResize;
       const comment = (dlg.comments || []).find((c) => c.id === commentId);
       if (!comment) return;
@@ -714,6 +734,7 @@ export function registerGlobalHandlers() {
         const nodeX = dropX - 120;
         const nodeY = drawMode === 'out' ? dropY : dropY - 140;
 
+        const tDrop = performance.now();
         State.startBatch();
         const newNode = State.addNode(nodeX, nodeY);
         if (newNode) {
@@ -724,6 +745,9 @@ export function registerGlobalHandlers() {
           toast('Nodo creado y conectado', 'success');
         } else {
           State.endBatch();
+        }
+        if (performance.now() - tDrop > 120) {
+          console.warn(`[perf] drop-create ${Math.round(performance.now() - tDrop)}ms (batch + full re-render)`);
         }
       }
       endDraw();

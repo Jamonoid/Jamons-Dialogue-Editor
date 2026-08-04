@@ -7,6 +7,7 @@ import * as State from './state.js';
 import { t, getLang, setText } from './lang.js';
 import { toast, showAILoading, hideAILoading, showAIGenerateModal } from './ui.js';
 import * as AI from './ai.js';
+import { render as renderCanvas } from './canvas.js';
 
 let currentTarget = null;
 let renderedTarget = null;
@@ -521,6 +522,7 @@ function renderNode(nodeId) {
       if (e.target.classList.contains('conn-delete') || e.target.classList.contains('conn-reorder')) return;
       const targetId = card.dataset.navNode;
       State.setSelectedNodeId(targetId);
+      renderCanvas(); // move the selection ring — setSelectedNodeId is silent
       show('node', targetId);
     });
   });
@@ -533,7 +535,10 @@ function renderNode(nodeId) {
   $('#insp-duplicate').addEventListener('click', () => {
     const dup = State.duplicateNode(nodeId);
     if (dup) {
+      // duplicateNode already re-rendered; the selection change after it is
+      // silent, so repaint the canvas for the ring to land on the duplicate
       State.setSelectedNodeId(dup.id);
+      renderCanvas();
       show('node', dup.id);
     }
   });
@@ -787,6 +792,7 @@ function renderStoryNode(nodeId) {
       if (e.target.classList.contains('conn-delete') || e.target.classList.contains('conn-reorder') || e.target.classList.contains('conn-label-input')) return;
       const targetId = card.dataset.navNode;
       State.setSelectedNodeId(targetId);
+      renderCanvas(); // move the selection ring — setSelectedNodeId is silent
       show('node', targetId);
     });
   });
@@ -798,7 +804,10 @@ function renderStoryNode(nodeId) {
   $('#insp-duplicate').addEventListener('click', () => {
     const dup = State.duplicateNode(nodeId);
     if (dup) {
+      // duplicateNode already re-rendered; the selection change after it is
+      // silent, so repaint the canvas for the ring to land on the duplicate
       State.setSelectedNodeId(dup.id);
+      renderCanvas();
       show('node', dup.id);
     }
   });

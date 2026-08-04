@@ -134,6 +134,12 @@ export function showContextMenu(x, y, items) {
   const menu = $('#context-menu');
   cleanupContextMenu();
 
+  // Menu actions can mutate the graph, and a focused inline textarea makes the
+  // canvas skip full re-renders (the menu items preventDefault their mousedown,
+  // so the focus would survive otherwise) — leave text editing now.
+  const focusedNodeText = document.querySelector('.node-inline-text:focus');
+  if (focusedNodeText) focusedNodeText.blur();
+
   // Store handlers by action name
   items.forEach((item) => {
     if (item.action && item.handler) {

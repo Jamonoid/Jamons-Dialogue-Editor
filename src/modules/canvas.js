@@ -86,11 +86,26 @@ export function render() {
     return;
   }
 
-  // If a node textarea is focused, only update connections (don't destroy the textarea)
+  // If a node textarea is focused, don't rebuild the DOM (that would destroy
+  // the textarea and kill the focus) — but DO sync the selection visuals and
+  // connections, otherwise the gold ring lags behind on the previous node.
+  // Safety net: if the graph STRUCTURE changed under the focused textarea
+  // (node/comment added or removed — e.g. by MCP or chat edits), fall through
+  // to the full rebuild anyway; a lost focus beats an invisible node.
   const focusedTextarea = nodesLayer.querySelector('.node-inline-text:focus');
   if (focusedTextarea) {
-    renderConnections();
-    return;
+    const domNodeIds = new Set(
+      [...nodesLayer.querySelectorAll('.dialogue-node')].map((el) => el.dataset.nodeId)
+    );
+    const structureChanged =
+      dlg.nodes.length !== domNodeIds.size ||
+      dlg.nodes.some((n) => !domNodeIds.has(n.id)) ||
+      (dlg.comments || []).length !== nodesLayer.querySelectorAll('.graph-comment').length;
+    if (!structureChanged) {
+      syncSelectionVisuals(dlg, nodesLayer);
+      renderConnections();
+      return;
+    }
   }
 
   // Q10: Restore camera when switching dialogues (or dialogue ⇄ story map)
@@ -146,6 +161,30 @@ export function render() {
     },
     offset,
     get zoom() { return zoom; },
+  });
+}
+
+/**
+ * Lightweight selection sync: toggles the .selected class on the EXISTING
+ * node/comment DOM without rebuilding it, and keeps the inline NPC border
+ * color coherent (inline style beats the .selected CSS ring, so it must be
+ * cleared while selected and restored when deselected). Idempotent — safe to
+ * call from anywhere the selection changed without a full re-render.
+ */
+export function syncSelectionVisuals(dlg, nodesLayer = $('#nodes-layer')) {
+  if (!dlg || !nodesLayer) return;
+  const isStory = dlg.id === 'story';
+  nodesLayer.querySelectorAll('.dialogue-node').forEach((el) => {
+    const id = el.dataset.nodeId;
+    const selected = State.isNodeSelected(id);
+    el.classList.toggle('selected', selected);
+    const node = dlg.nodes.find((n) => n.id === id);
+    const npcColor = !isStory && node ? State.getNPCColor(node.npcId) : null;
+    el.style.borderColor = selected ? '' : (npcColor || '');
+  });
+  const selComment = State.getSelectedCommentId();
+  nodesLayer.querySelectorAll('.graph-comment').forEach((el) => {
+    el.classList.toggle('selected', el.dataset.commentId === selComment);
   });
 }
 
@@ -385,6 +424,11 @@ export function setup() {
     if (e.target.closest && e.target.closest('.conn-label')) return; // clicking a connection label shouldn't select (allows click-to-edit)
 
     // ── Left button → selection marquee ──
+    // preventDefault() below also suppresses the native focus change, so blur
+    // any focused node textarea manually (click-away must defocus, and the
+    // full re-render path depends on nothing being focused).
+    const focusedText = document.querySelector('.node-inline-text:focus');
+    if (focusedText) focusedText.blur();
     e.preventDefault(); // Prevent native text selection
     isSelecting = true;
     selectionAdditive = e.shiftKey;
@@ -461,6 +505,9 @@ export function setup() {
         render();
         if (onNodeSelectedCallback && State.getSelectedNodeId()) {
           onNodeSelectedCallback(State.getSelectedNodeId());
+        } else if (onCanvasClickCallback && !State.getSelectedNodeId()) {
+          // Marquee over empty space selected nothing → clear the inspector too
+          onCanvasClickCallback();
         }
       } else {
         // Plain click on empty canvas → deselect (UE behaviour)

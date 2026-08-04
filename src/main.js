@@ -20,10 +20,22 @@ import * as MemoryMap from './modules/memory-map.js';
 
 // ─── RENDER ALL ──────────────────────────────────────
 function renderAll() {
+  const t0 = performance.now();
   Sidebar.render();
+  const t1 = performance.now();
   Canvas.render();
+  const t2 = performance.now();
   Inspector.render();
+  const t3 = performance.now();
   Chat.onStateChange();
+  const t4 = performance.now();
+  // Perf tracing: warn when a full re-render is noticeably slow so we can
+  // see WHICH phase is eating the time (remove when the jank is solved)
+  if (t4 - t0 > 120) {
+    console.warn(
+      `[perf] renderAll ${Math.round(t4 - t0)}ms — sidebar ${Math.round(t1 - t0)} · canvas ${Math.round(t2 - t1)} · inspector ${Math.round(t3 - t2)} · chat ${Math.round(t4 - t3)}`
+    );
+  }
 
   // Sync view tabs (Diálogo / Historia)
   const mode = State.getViewMode();
@@ -79,6 +91,15 @@ document.addEventListener('df-open-dialogue', (e) => {
 Canvas.onNodeSelected((nodeId) => Inspector.show('node', nodeId));
 Canvas.onCommentSelected((commentId) => Inspector.show('comment', commentId));
 Canvas.onCanvasClick(() => Inspector.clear());
+
+// Selection changed without going through onSelect (e.g. shift+click toggle):
+// sync the inspector with whatever the selection is now
+document.addEventListener('df-selection-changed', () => {
+  const ids = State.getSelectedNodeIds();
+  if (ids.size > 1) Inspector.render(); // multi-select panel
+  else if (ids.size === 1) Inspector.show('node', [...ids][0]);
+  else Inspector.clear();
+});
 
 document.addEventListener('langchange', () => {
   Canvas.render();
@@ -203,6 +224,7 @@ function setupKeyboard() {
         State.clearSelection();
         dlg.nodes.forEach((n) => State.addToSelection(n.id));
         Canvas.render();
+        Inspector.render(); // show the multi-select panel
         toast(dlg.nodes.length + ' nodos seleccionados', 'info');
       }
     }
@@ -285,10 +307,13 @@ function setupKeyboard() {
       }
     }
 
-    // Escape → close overlays, deselect all
+    // Escape → close overlays, defocus text editing, deselect all
     if (e.key === 'Escape') {
       $('#modal-overlay').classList.remove('active');
       hideContextMenu();
+      // Leave inline text editing (so the next render is a full one)
+      const focusedNodeText = document.querySelector('.node-inline-text:focus');
+      if (focusedNodeText) focusedNodeText.blur();
       if (State.getSelectedNodeIds().size > 0 || State.getSelectedCommentId()) {
         State.clearSelection();
         Inspector.clear();
