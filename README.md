@@ -13,6 +13,7 @@ Editor visual de árboles de diálogo construido para desarrollo de videojuegos.
 - Edición de texto inline en el canvas o en el panel inspector
 - Ramificación condicional con condiciones `IF` y acciones `DO` en las conexiones (Solo visual)
 - Multi-selección, duplicación y eliminación en lote de nodos
+- **Lock de nodos (🔒)**: bloquea un nodo para que la IA no lo toque — la traducción lo omite, y el chat/MCP no pueden modificarlo, borrarlo ni pisarlo al reescribir un diálogo (los nodos bloqueados sobreviven a los replace). La edición manual sigue libre. Toggle desde el menú contextual del nodo, el inspector o clic en el candado
 - Historial completo de deshacer/rehacer (Ctrl+Z / Ctrl+Y)
 
 ### Comentarios estilo Unreal Blueprints

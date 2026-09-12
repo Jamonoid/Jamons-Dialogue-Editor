@@ -222,15 +222,20 @@ export async function translateNode(nodeId) {
   if (!dlg) throw new Error('No hay diálogo activo');
   const node = dlg.nodes.find((n) => n.id === nodeId);
   if (!node) throw new Error('Nodo no encontrado');
+  if (node.locked) throw new Error('El nodo está bloqueado (🔒) — desbloquéalo para traducirlo');
 
   const sourceText = node.text.es;
   if (!sourceText || !sourceText.trim()) {
     throw new Error('El nodo no tiene texto en ES');
   }
 
+  // Tell the localizer WHO is speaking so it can match the character's voice
+  const speaker = node.npcId ? State.getNPC(node.npcId)?.name : null;
+  const userContent = speaker ? `Speaker: ${speaker}\n\n${sourceText}` : sourceText;
+
   const messages = [
     { role: 'system', content: TRANSLATE_SINGLE_SYSTEM },
-    { role: 'user', content: sourceText }
+    { role: 'user', content: userContent }
   ];
 
   const translated = await callProvider(messages, { task: 'translate' });
@@ -240,21 +245,36 @@ export async function translateNode(nodeId) {
   return translated;
 }
 
-export async function translateAllNodes() {
+// nodeIds (optional): restrict the batch to these ids (e.g. "traducir seleccionados")
+export async function translateAllNodes(nodeIds = null) {
   const dlg = State.getActiveDialogue();
   if (!dlg) throw new Error('No hay diálogo activo');
 
-  const nodesToTranslate = dlg.nodes.filter((n) => {
+  const idFilter = nodeIds ? new Set(nodeIds) : null;
+  const candidates = idFilter ? dlg.nodes.filter((n) => idFilter.has(n.id)) : dlg.nodes;
+
+  // Locked nodes are skipped — their EN text is protected from AI overwrites
+  const nodesToTranslate = candidates.filter((n) => {
     const source = n.text.es;
-    return source && source.trim();
+    return source && source.trim() && !n.locked;
   });
 
   if (nodesToTranslate.length === 0) {
-    throw new Error('No hay nodos con texto en ES para traducir');
+    const lockedCount = candidates.filter((n) => n.locked).length;
+    const scope = idFilter ? 'nodos seleccionados' : 'nodos';
+    throw new Error(lockedCount > 0
+      ? `No hay ${scope} para traducir (los nodos bloqueados 🔒 se omiten)`
+      : `No hay ${scope} con texto en ES para traducir`);
   }
 
-  // Batch all texts in one call for efficiency
-  const texts = nodesToTranslate.map((n, i) => `[${i + 1}] ${n.text.es}`).join('\n---\n');
+  // Batch all texts in one call for efficiency, tagging each line's speaker
+  // so the localizer can match the character's voice
+  const texts = nodesToTranslate
+    .map((n, i) => {
+      const speaker = n.npcId ? State.getNPC(n.npcId)?.name : null;
+      return `[${i + 1}] ${speaker ? `(${speaker}) ` : ''}${n.text.es}`;
+    })
+    .join('\n---\n');
 
   const messages = [
     { role: 'system', content: TRANSLATE_BATCH_SYSTEM },
@@ -273,6 +293,12 @@ export async function translateAllNodes() {
     let translated = parts[i] || '';
     // Remove the [N] prefix if present
     translated = translated.replace(/^\[\d+\]\s*/, '').trim();
+    // Defensive: strip an echoed "(Speaker)" tag if the model repeats it
+    const speaker = node.npcId ? State.getNPC(node.npcId)?.name : null;
+    if (speaker) {
+      const escaped = speaker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      translated = translated.replace(new RegExp(`^\\(${escaped}\\)\\s*`), '').trim();
+    }
     if (translated) {
       const updatedText = { ...node.text };
       updatedText.en = translated;

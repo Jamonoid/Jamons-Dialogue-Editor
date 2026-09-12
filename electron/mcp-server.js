@@ -40,7 +40,7 @@ function buildServer(exec) {
   );
   register(
     'get_dialogue',
-    'Read one dialogue. Default format "compact" (token-lean): nodes list {id, npc, es, en?, if?, do?} with empty fields omitted, plus "edges" as [from, to, label?] tuples and "start". Use "structure" for ids/edges only (no text) or "full" for the verbose legacy shape.',
+    'Read one dialogue. Default format "compact" (token-lean): nodes list {id, npc, es, en?, if?, do?, locked?} with empty fields omitted, plus "edges" as [from, to, label?] tuples and "start". Nodes with locked:true are author-protected: update_node/delete_node will refuse them and replace-writes keep them. Use "structure" for ids/edges only (no text) or "full" for the verbose legacy shape.',
     {
       dialogue_id: z.string().optional().describe('Dialogue ID; defaults to the active dialogue'),
       format: z.enum(['compact', 'structure', 'full']).optional().describe('Output shape; default compact'),
@@ -60,7 +60,7 @@ function buildServer(exec) {
   // ── Whole-graph writer (preferred for creating or rewriting dialogue trees) ──
   register(
     'write_dialogue_graph',
-    'Write a whole dialogue tree in ONE call: nodes + connections + start node, using your own temp ids ("n1", "n2"...). Returns idMap (temp id → real id). With "title" it creates a new dialogue (optionally linked to npc_name/quest_name, with an author comment) and activates it; without "title" it writes into dialogue_id or the active dialogue. mode "replace" (default) clears existing nodes first — use it to rewrite a dialogue; "append" keeps them (connections may then also reference real existing node ids). The tree is auto-laid-out; no auto_layout call needed. The payload is validated before any mutation, so a bad reference aborts the whole write.',
+    'Write a whole dialogue tree in ONE call: nodes + connections + start node, using your own temp ids ("n1", "n2"...). Returns idMap (temp id → real id). With "title" it creates a new dialogue (optionally linked to npc_name/quest_name, with an author comment) and activates it; without "title" it writes into dialogue_id or the active dialogue. mode "replace" (default) clears existing nodes first — use it to rewrite a dialogue; "append" keeps them (connections may then also reference real existing node ids). Author-locked nodes (locked:true in get_dialogue) ALWAYS survive a replace — connections may reference their real ids. The tree is auto-laid-out; no auto_layout call needed. The payload is validated before any mutation, so a bad reference aborts the whole write.',
     {
       title: z.string().optional().describe('Create a new dialogue with this title (ignores dialogue_id/mode)'),
       npc_name: z.string().optional().describe('Main NPC for the new dialogue (created if missing)'),
@@ -114,7 +114,7 @@ function buildServer(exec) {
   );
   register(
     'clear_dialogue',
-    'Remove ALL nodes of a dialogue, leaving one empty start node. Useful before rewriting a dialogue node-by-node — though write_dialogue_graph with mode "replace" does clear+write in one call.',
+    'Remove ALL nodes of a dialogue, leaving one empty start node. Author-locked nodes (locked:true) survive the clear. Useful before rewriting a dialogue node-by-node — though write_dialogue_graph with mode "replace" does clear+write in one call.',
     { dialogue_id: dialogueIdParam },
   );
   register(
@@ -140,7 +140,7 @@ function buildServer(exec) {
   );
   register(
     'update_node',
-    'Update text, speaker NPC, condition and/or action of an existing node. Only the provided fields change (condition/action accept "" to clear).',
+    'Update text, speaker NPC, condition and/or action of an existing node. Only the provided fields change (condition/action accept "" to clear). Refused for author-locked nodes (locked:true).',
     {
       node_id: z.string(),
       text_es: z.string().optional(),
@@ -172,7 +172,7 @@ function buildServer(exec) {
   );
   register(
     'delete_node',
-    'Delete a node (and every connection pointing at it).',
+    'Delete a node (and every connection pointing at it). Refused for author-locked nodes (locked:true).',
     { node_id: z.string(), dialogue_id: dialogueIdParam },
   );
   register(

@@ -47,6 +47,7 @@ function buildProjectContext() {
         .join(', ');
       const flags = [
         n.id === dlg.startNodeId ? '[START]' : '',
+        n.locked ? '[LOCKED 🔒]' : '',
         n.condition ? `[IF:${n.condition.slice(0, 60)}]` : '',
         n.action ? `[DO:${n.action.slice(0, 60)}]` : '',
       ].filter(Boolean).join(' ');
@@ -191,6 +192,7 @@ function executeActions(actions) {
 
           const node = activeDlg.nodes.find(n => n.id === nodeId);
           if (!node) { summary.push(`⚠ Node not found: ${action.node_id}`); break; }
+          if (node.locked) { summary.push(`🔒 Node ...${nodeId.slice(-6)} is locked by the author — skipped (unlock it in the editor to allow AI edits)`); break; }
 
           if (action.text_es !== undefined || action.text_en !== undefined) {
             State.updateNodeText(nodeId, {
@@ -233,6 +235,9 @@ function executeActions(actions) {
         case 'delete_node': {
           const nodeId = resolveId(action.node_id);
           if (!nodeId) { summary.push('⚠ Invalid node ID'); break; }
+          const dlgForDelete = State.getActiveDialogue();
+          const nodeToDelete = dlgForDelete?.nodes.find(n => n.id === nodeId);
+          if (nodeToDelete?.locked) { summary.push(`🔒 Node ...${nodeId.slice(-6)} is locked by the author — not deleted`); break; }
           State.deleteNode(nodeId);
           summary.push(`✓ Node deleted`);
           break;

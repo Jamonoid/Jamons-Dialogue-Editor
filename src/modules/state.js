@@ -610,6 +610,7 @@ export function duplicateNode(nodeId) {
     condition: original.condition || '',
     action: original.action || '',
   };
+  if (original.locked) newNode.locked = true;
   if (original.questId !== undefined) newNode.questId = original.questId;
   dlg.nodes.push(newNode);
   emitChange();
@@ -622,6 +623,22 @@ export function setStartNode(nodeId) {
   pushUndo();
   dlg.startNodeId = nodeId;
   emitChange();
+}
+
+/**
+ * Toggle the AI lock of a node. Locked nodes are skipped by translation and
+ * protected from AI rewrites (chat / MCP replace, update, delete). Manual
+ * editing in the app stays allowed — the lock is anti-AI, not anti-user.
+ */
+export function toggleNodeLock(nodeId) {
+  const dlg = getActiveGraph();
+  if (!dlg) return;
+  const node = dlg.nodes.find((n) => n.id === nodeId);
+  if (!node) return;
+  pushUndo();
+  node.locked = !node.locked;
+  emitChange();
+  return node.locked;
 }
 
 /** Assign a quest to a story map node */

@@ -15,16 +15,16 @@
 | **localStorage** | Data persistence |
 | **JSON** | Export/import format |
 | **OpenRouter API** | AI translation & dialogue generation (HTTP, per-token) |
-| **Claude Code CLI** | Alternative AI provider using the local Claude subscription (no API key) |
-| **transformers.js** (`@huggingface/transformers`) | Local embeddings for the vector memory / RAG — runs on-device, no API key (Claude cannot generate embeddings) |
+| **Codex CLI** | Alternative AI provider using the local Codex subscription (no API key) |
+| **transformers.js** (`@huggingface/transformers`) | Local embeddings for the vector memory / RAG — runs on-device, no API key (Codex cannot generate embeddings) |
 | **IndexedDB** | Vector store for the semantic memory (outside project state / undo) |
-| **MCP (Model Context Protocol)** | Embedded server so external Claude Code / CLI can drive the app |
+| **MCP (Model Context Protocol)** | Embedded server so external Codex / CLI can drive the app |
 
 ## Architecture
 
 ```
 electron/
-  main.js          → Electron main process (window creation, IPC, Claude Code spawn, MCP server startup)
+  main.js          → Electron main process (window creation, IPC, Codex spawn, MCP server startup)
   preload.js       → Secure bridge between main and renderer
   mcp-server.js    → Embedded MCP server (Streamable HTTP on 127.0.0.1:4747) exposing project tools
 
@@ -39,7 +39,7 @@ src/
     sidebar.js     → Left panel: NPC/Quest/Dialogue lists, collapsible sections
     ui.js          → Modals, toasts, context menus, confirmDelete, AI settings/generate modals
     lang.js        → Language toggle (ES/EN)
-    ai.js          → Multi-provider AI: OpenRouter (HTTP) + Claude Code (local CLI via IPC); per-task dispatcher, translation, generation, PDF/MD parsing
+    ai.js          → Multi-provider AI: OpenRouter (HTTP) + Codex (local CLI via IPC); per-task dispatcher, translation, generation, PDF/MD parsing
     chat.js        → Integrated AI chat assistant: floating panel, action executor, project context builder, RAG retrieval
     vector-memory.js → Local semantic memory: transformers.js embeddings (lazy-loaded), IndexedDB store, incremental indexing, top-k cosine search, chat memory
     memory-map.js  → "Neural map" overlay: PCA 3D projection of the vector memory on a DPR-aware canvas (orbit camera, similarity links, click-to-navigate)
@@ -160,23 +160,23 @@ SVG connection paths render with invisible fat hit-areas (12px stroke) for easie
 The `ai.js` module supports two AI providers, selectable **per task** (generate / translate / chat):
 
 - **OpenRouter** — HTTP API, needs an API key, pay-per-token. `callOpenRouter()`.
-- **Claude Code** — runs the user's locally installed `claude` CLI via Electron IPC (`window.electronAPI.claudeCall`), using the Claude Pro/Max subscription (no API key). `callClaudeCode()`. Desktop-only.
+- **Codex** — runs the user's locally installed `Codex` CLI via Electron IPC (`window.electronAPI.claudeCall`), using the Codex Pro/Max subscription (no API key). `callClaudeCode()`. Desktop-only.
 
-`callProvider(messages, { task })` is the dispatcher: it reads `config.provider{Generate,Translate,Chat}` (`'openrouter' | 'claude'`) and routes accordingly. All internal call sites go through it. All prompt templates are centralized in `prompts.js`.
+`callProvider(messages, { task })` is the dispatcher: it reads `config.provider{Generate,Translate,Chat}` (`'openrouter' | 'Codex'`) and routes accordingly. All internal call sites go through it. All prompt templates are centralized in `prompts.js`.
 
-#### Claude Code provider (Electron main)
-- `electron/main.js` spawns `claude -p --output-format json --model <model>`; the system prompt + prompt are sent via **stdin** (avoids Windows arg-length/escaping limits). The model arg is regex-validated (`/^[a-zA-Z0-9._-]+$/`).
-- IPC handlers: `ai:claude-call` (generation), `ai:claude-check` (CLI availability). Both return `{ ok, text | error }` with friendly Spanish messages for not-logged-in / rate-limit / overload.
-- Requires the `claude` CLI on the system PATH and a logged-in session (`claude` → `/login`).
+#### Codex provider (Electron main)
+- `electron/main.js` spawns `Codex -p --output-format json --model <model>`; the system prompt + prompt are sent via **stdin** (avoids Windows arg-length/escaping limits). The model arg is regex-validated (`/^[a-zA-Z0-9._-]+$/`).
+- IPC handlers: `ai:Codex-call` (generation), `ai:Codex-check` (CLI availability). Both return `{ ok, text | error }` with friendly Spanish messages for not-logged-in / rate-limit / overload.
+- Requires the `Codex` CLI on the system PATH and a logged-in session (`Codex` → `/login`).
 - Model field accepts aliases: `sonnet`, `opus`, `haiku` (defaults to `sonnet`).
 
 ### External control via MCP
 
-An **embedded MCP server** (`electron/mcp-server.js`, Streamable HTTP on `http://127.0.0.1:4747/mcp`) lets an *external* Claude Code session — e.g. from your GDD/story repo — read and edit the project without using the in-app chat. It boots in `app.whenReady()` and forwards each tool call to the renderer via `win.webContents.executeJavaScript('window.__mcpExecute(...)')`, so edits run on the live canvas with normal undo/redo and persistence.
+An **embedded MCP server** (`electron/mcp-server.js`, Streamable HTTP on `http://127.0.0.1:4747/mcp`) lets an *external* Codex session — e.g. from your GDD/story repo — read and edit the project without using the in-app chat. It boots in `app.whenReady()` and forwards each tool call to the renderer via `win.webContents.executeJavaScript('window.__mcpExecute(...)')`, so edits run on the live canvas with normal undo/redo and persistence.
 
 Register once (user scope, available from any repo) while Dialogue Forge is open:
 ```bash
-claude mcp add --transport http --scope user dialogue-forge http://127.0.0.1:4747/mcp
+Codex mcp add --transport http --scope user dialogue-forge http://127.0.0.1:4747/mcp
 ```
 
 Tools (`src/modules/mcp-bridge.js`). Every dialogue edit tool accepts an optional `dialogue_id` (defaults to the **active** dialogue) — no implicit-global-state failures when the active dialogue changes mid-session:
@@ -203,12 +203,12 @@ Translation prompts explicitly instruct the AI to preserve profanity, slang, and
 ```js
 {
   apiKey: string,              // OpenRouter API key (only used by the OpenRouter provider)
-  modelGenerate: string,       // Model for dialogue generation & extension (e.g. 'anthropic/claude-sonnet-4' or 'sonnet')
+  modelGenerate: string,       // Model for dialogue generation & extension (e.g. 'anthropic/Codex-sonnet-4' or 'sonnet')
   modelTranslate: string,      // Model for ES→EN translation (e.g. 'google/gemini-2.5-flash')
   modelChat: string,           // Model for the integrated chat assistant
-  providerGenerate: string,    // 'openrouter' | 'claude' — provider for generation/extension
-  providerTranslate: string,   // 'openrouter' | 'claude' — provider for translation
-  providerChat: string,        // 'openrouter' | 'claude' — provider for chat
+  providerGenerate: string,    // 'openrouter' | 'Codex' — provider for generation/extension
+  providerTranslate: string,   // 'openrouter' | 'Codex' — provider for translation
+  providerChat: string,        // 'openrouter' | 'Codex' — provider for chat
   temperature: number,         // Default 0.7 (OpenRouter only)
   isThinking: boolean,         // Strip <thinking> blocks from response
   contextFiles: [{name, text}],  // Multiple PDF/MD/TXT files for context
@@ -218,7 +218,7 @@ Translation prompts explicitly instruct the AI to preserve profanity, slang, and
 }
 ```
 
-The AI settings modal (`ui.js`) shows: "same provider everywhere" shortcuts, `<datalist>` model suggestions per provider, the OpenRouter key field only when some task uses OpenRouter, a "🔌 Probar conexión" button (OpenRouter `/api/v1/key` check + `ai:claude-check` IPC), and the embeddings toggle/model field.
+The AI settings modal (`ui.js`) shows: "same provider everywhere" shortcuts, `<datalist>` model suggestions per provider, the OpenRouter key field only when some task uses OpenRouter, a "🔌 Probar conexión" button (OpenRouter `/api/v1/key` check + `ai:Codex-check` IPC), and the embeddings toggle/model field.
 
 ### Vector Memory (RAG) & Neural Map
 
@@ -232,7 +232,7 @@ The AI settings modal (`ui.js`) shows: "same provider everywhere" shortcuts, `<d
 - The chat performs top-k (8) cosine retrieval per message and injects a `Relevant Project Memory` block into the system prompt; when there is no index it falls back to the old full-text dump of context files. Each successful exchange is remembered (fire-and-forget). The 🗑 button in the chat header clears history + chat vectors.
 - Dialogue **generation & extension** (`ai.js` → `getContextAndNpcs(query)`) also use RAG: top-k (10) retrieval against the generation prompt, filtered to `file`/`node`/`npc`/`quest` types (chat exchanges are excluded — they are not world lore). Falls back to the raw 8000-char context-file dump when there is no index or retrieval fails. Uses a dynamic `import('./vector-memory.js')` because `vector-memory.js` statically imports `ai.js` (cycle avoidance).
 - `memory-map.js` ("🧠 Memoria" toolbar button) renders the vectors in **3D** on a full-screen canvas overlay — plain canvas 2D with a hand-rolled perspective projection, no WebGL/three.js. PCA to 3 components via covariance-free power iteration (deflation against previous PCs), each axis normalized into a ±500 world cube. Orbit camera: drag = rotate (yaw/pitch, pitch clamped ±1.55), shift/right/middle-drag = pan, wheel = dolly zoom (cursor-anchored via pan compensation), double-click = reset view. Idle auto-rotation via a rAF loop (stops on first drag; the "⟳ Girar" button toggles it; paused while hovering a point). Depth cues: painter's-algorithm sorting, perspective-scaled radii, depth-based alpha, link fade with distance, and a faint wireframe of the world cube. kNN similarity links (threshold slider; skipped above 600 items, hover-only links instead), legend toggles per type, and tooltips on projected positions. **Clicking a point opens a right-side detail panel** (`#memmap-detail`: type badge, metadata, full text, top-6 cosine neighbors — clickable; node/dialogue items get a "→ Ir/Abrir" button which is the only thing that navigates to the editor; clicks after a >4 px drag are ignored, empty-space click closes the panel). The toolbar **RAG test search** (`#memmap-search`, Enter) runs `VectorMemory.search()` — the exact chat/generation retrieval path — listing ranked results with scores in the panel and spotlighting hits on the canvas (gold rings, non-hits dimmed). **Model load feedback**: `getEmbedder()` passes a `progress_callback` that aggregates per-file byte progress into `{phase:'download', loaded, total}`; the map renders it as MB text + a progress bar (also used for embed progress). Escape peels layers: detail panel → search highlights → overlay. `reload()` only projects the largest same-model vector group (mixed embedding models would corrupt the PCA) and shows a "Reindexar para migrarlos" hint when vectors are hidden.
-Legacy configs with a single `model` field are auto-migrated to all three on first load. Missing `provider*` fields default to `'openrouter'`. The settings modal (`ui.js`) shows a provider dropdown next to each per-task model input; the model field placeholder/hint switches between OpenRouter model IDs and Claude aliases based on the selected provider.
+Legacy configs with a single `model` field are auto-migrated to all three on first load. Missing `provider*` fields default to `'openrouter'`. The settings modal (`ui.js`) shows a provider dropdown next to each per-task model input; the model field placeholder/hint switches between OpenRouter model IDs and Codex aliases based on the selected provider.
 
 #### Translation (ES → EN only)
 - `translateNode(nodeId)` — Translates a single node's Spanish text to English

@@ -121,7 +121,7 @@ export function renderNodes(dlg, container) {
         : (isStart ? 'INICIO' : (npcName ? esc(npcName) : 'NODO'));
 
       return `
-      <div class="dialogue-node ${isStory ? 'story-node' : ''} ${isStart && !npcColor ? 'start-node' : ''} ${isSelected ? 'selected' : ''}"
+      <div class="dialogue-node ${isStory ? 'story-node' : ''} ${isStart && !npcColor ? 'start-node' : ''} ${isSelected ? 'selected' : ''} ${node.locked ? 'locked' : ''}"
            data-node-id="${node.id}"
            style="${nodeStyle}">
         ${isStart ? '<div class="node-start-indicator" title="Nodo inicial">▶</div>' : ''}
@@ -129,6 +129,7 @@ export function renderNodes(dlg, container) {
         <div class="node-header" ${npcColor ? `style="background: ${hexToRgba(npcColor, 0.1)}; border-bottom-color: ${hexToRgba(npcColor, 0.2)};"` : ''}>
           <span class="node-type-badge ${isStory && !quest ? 'no-quest' : ''}" ${npcColor ? `style="background: ${hexToRgba(npcColor, 0.15)}; color: ${npcColor};"` : ''}>${badgeText}</span>
           <div class="node-metadata-badges">
+            ${!isStory && node.locked ? `<span class="meta-badge lock" data-lock-node="${node.id}" title="Nodo bloqueado: la IA no lo traduce ni lo modifica. Clic para desbloquear.">🔒</span>` : ''}
             ${!isStory && node.condition ? `<span class="meta-badge condition" title="Condición: ${esc(node.condition)}">IF</span>` : ''}
             ${!isStory && node.action ? `<span class="meta-badge action" title="Acción: ${esc(node.action)}">DO</span>` : ''}
           </div>
@@ -225,6 +226,8 @@ export function setupNodeInteractions(dlg, callbacks) {
       e.stopPropagation();
       if (consumeRmbPan()) return; // RMB gesture was a canvas pan that ended here
       const isStart = dlg.startNodeId === nodeId;
+      const isStoryNode = dlg.id === 'story';
+      const node = dlg.nodes.find((n) => n.id === nodeId);
 
       showContextMenu(e.clientX, e.clientY, [
         {
@@ -246,6 +249,14 @@ export function setupNodeInteractions(dlg, callbacks) {
           action: 'set-start',
           handler: () => State.setStartNode(nodeId),
         },
+        ...(!isStoryNode ? [{
+          label: node?.locked ? '🔓 Desbloquear nodo (IA)' : '🔒 Bloquear nodo (IA)',
+          action: 'toggle-lock',
+          handler: () => {
+            const locked = State.toggleNodeLock(nodeId);
+            toast(locked ? 'Nodo bloqueado: la IA lo omitirá' : 'Nodo desbloqueado', 'info');
+          },
+        }] : []),
         { divider: true },
         {
           label: 'Eliminar nodo (Delete)',
@@ -297,6 +308,16 @@ export function setupNodeInteractions(dlg, callbacks) {
         width: node.width || 240,
         height: currentHeight,
       };
+    });
+  });
+
+  // ── Lock badge → click to toggle the AI lock ──
+  $$('.meta-badge.lock').forEach((badge) => {
+    badge.addEventListener('mousedown', (e) => e.stopPropagation());
+    badge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const locked = State.toggleNodeLock(badge.dataset.lockNode);
+      toast(locked ? 'Nodo bloqueado: la IA lo omitirá' : 'Nodo desbloqueado', 'info');
     });
   });
 
@@ -742,6 +763,7 @@ export function registerGlobalHandlers() {
           else State.addConnection(newNode.id, drawFromNodeId);
           State.setSelectedNodeId(newNode.id);
           State.endBatch();
+          document.dispatchEvent(new CustomEvent('df-selection-changed'));
           toast('Nodo creado y conectado', 'success');
         } else {
           State.endBatch();

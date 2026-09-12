@@ -72,6 +72,8 @@ export function render() {
 function renderMultiSelect(selectedIds) {
   const el = $('#inspector-content');
   const count = selectedIds.size;
+  // Translation acts on the active dialogue — story nodes are not translatable
+  const canTranslate = State.getViewMode() !== 'story';
   el.innerHTML = `
     <div class="inspector-header">
       <div class="type-indicator node-type">✦</div>
@@ -79,9 +81,23 @@ function renderMultiSelect(selectedIds) {
     </div>
     <div class="inspector-body">
       <p class="field-hint" style="margin-bottom:12px">Usa Shift+clic para añadir o quitar nodos de la selección.</p>
+      ${canTranslate ? `<button class="btn btn-ai btn-block" id="insp-multi-translate" style="margin-bottom:8px">🌐 Traducir seleccionados (ES → EN)</button>` : ''}
       <button class="btn btn-danger btn-block" id="insp-multi-delete">Eliminar ${count} nodos</button>
     </div>
   `;
+
+  $('#insp-multi-translate')?.addEventListener('click', async () => {
+    const ids = [...selectedIds];
+    showAILoading(`Traduciendo ${ids.length} nodos ES → EN...`);
+    try {
+      const translated = await AI.translateAllNodes(ids);
+      toast(translated + ' nodos traducidos a EN', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      hideAILoading();
+    }
+  });
 
   $('#insp-multi-delete').addEventListener('click', () => {
     const ids = [...selectedIds];
@@ -453,8 +469,9 @@ function renderNode(nodeId) {
 
       <div style="margin-top:8px">
         ${!isStart ? '<button class="btn btn-block" id="insp-set-start" style="margin-bottom:8px">Establecer como inicio</button>' : ''}
+        <button class="btn btn-block" id="insp-node-lock" style="margin-bottom:8px" title="Un nodo bloqueado no se traduce ni puede ser modificado/borrado por la IA (chat, MCP). La edición manual sigue libre.">${node.locked ? '🔓 Desbloquear (IA)' : '🔒 Bloquear (IA)'}</button>
         <button class="btn btn-block" id="insp-duplicate" style="margin-bottom:8px">Duplicar nodo</button>
-        <button class="btn btn-ai btn-block" id="insp-node-translate" style="margin-bottom:8px">🌐 Traducir ES → EN</button>
+        <button class="btn btn-ai btn-block" id="insp-node-translate" style="margin-bottom:8px" ${node.locked ? 'disabled title="Nodo bloqueado — la traducción lo omite"' : ''}>🌐 Traducir ES → EN</button>
         <button class="btn btn-danger btn-block" id="insp-node-delete">Eliminar Nodo</button>
       </div>
     </div>
@@ -541,6 +558,12 @@ function renderNode(nodeId) {
       renderCanvas();
       show('node', dup.id);
     }
+  });
+
+  $('#insp-node-lock').addEventListener('click', () => {
+    const locked = State.toggleNodeLock(nodeId);
+    toast(locked ? 'Nodo bloqueado: la IA lo omitirá' : 'Nodo desbloqueado', 'info');
+    show('node', nodeId);
   });
 
   $('#insp-node-delete').addEventListener('click', () => {

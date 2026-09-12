@@ -1966,6 +1966,24 @@ body {
   border: 1px solid rgba(0, 206, 201, 0.3);
 }
 
+/* AI-lock badge: the node is skipped by translation and protected from AI rewrites */
+.meta-badge.lock {
+  background: rgba(229, 192, 123, 0.18);
+  border: 1px solid rgba(229, 192, 123, 0.4);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  padding: 1px 4px 2px;
+}
+
+.meta-badge.lock:hover {
+  background: rgba(229, 192, 123, 0.35);
+}
+
+.dialogue-node.locked {
+  border-style: dashed;
+}
+
 /* ===== CONNECTION HOVER HIGHLIGHT (Q3) ===== */
 .dialogue-node.conn-highlighted {
   box-shadow: 0 0 0 2px var(--accent-primary), 0 0 20px var(--accent-glow) !important;

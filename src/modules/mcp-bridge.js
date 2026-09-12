@@ -106,6 +106,19 @@ function removeNodeFrom(dlg, nodeId) {
 /** Wipe all nodes, leaving one empty start node (direct mutation; call inside a batch). */
 export function clearDialogueContent(dlg) {
   if (dlg.id === State.getActiveDialogueId()) State.clearSelection();
+  // Locked nodes (🔒) survive AI clears — only unlocked content is removed
+  const kept = dlg.nodes.filter((n) => n.locked);
+  if (kept.length > 0) {
+    const keptIds = new Set(kept.map((n) => n.id));
+    kept.forEach((n) => {
+      n.connections = (n.connections || [])
+        .map(State.normalizeConnection)
+        .filter((c) => keptIds.has(c.targetId));
+    });
+    dlg.nodes = kept;
+    dlg.startNodeId = keptIds.has(dlg.startNodeId) ? dlg.startNodeId : kept[0].id;
+    return dlg.startNodeId;
+  }
   const start = makeNode(300, 100);
   dlg.nodes = [start];
   dlg.startNodeId = start.id;
@@ -181,6 +194,7 @@ function serializeFull(dlg) {
       text_es: n.text?.es || '',
       text_en: n.text?.en || '',
       isStart: n.id === dlg.startNodeId,
+      locked: !!n.locked,
       condition: n.condition || '',
       action: n.action || '',
       connections: (n.connections || []).map((c) => {
@@ -216,6 +230,7 @@ function serializeCompact(dlg) {
       if (n.text?.en) node.en = n.text.en;
       if (n.condition) node.if = n.condition;
       if (n.action) node.do = n.action;
+      if (n.locked) node.locked = true;
       return node;
     }),
     edges: collectEdges(dlg),
@@ -278,10 +293,16 @@ export function writeDialogueGraph(payload = {}) {
     tempIds.add(spec.id);
   });
 
-  // Resolve target and validate references BEFORE mutating anything
+  // Resolve target and validate references BEFORE mutating anything.
+  // Locked nodes (🔒) survive a replace, so their real ids stay referenceable
+  // (and collide-checked) just like existing ids do in append mode.
   const target = creating ? null : resolveDialogue(dialogue_id);
   const isAppend = !creating && mode === 'append';
-  const existingIds = new Set(isAppend ? target.nodes.map((n) => n.id) : []);
+  const existingIds = new Set(
+    isAppend ? target.nodes.map((n) => n.id)
+      : target ? target.nodes.filter((n) => n.locked).map((n) => n.id)
+      : []
+  );
   tempIds.forEach((id) => {
     if (existingIds.has(id)) throw new Error(`Node id collides with an existing node: ${id}. Use fresh temp ids.`);
   });
@@ -297,6 +318,7 @@ export function writeDialogueGraph(payload = {}) {
   State.startBatch();
   try {
     let dlg = target;
+    let preservedLocked = 0;
     if (creating) {
       const npc = npcNameArg ? findOrCreateNPC(npcNameArg) : null;
       const quest = questNameArg ? findOrCreateQuest(questNameArg) : null;
@@ -306,8 +328,17 @@ export function writeDialogueGraph(payload = {}) {
       dlg.startNodeId = null;
     } else if (mode === 'replace') {
       if (dlg.id === State.getActiveDialogueId()) State.clearSelection();
-      dlg.nodes = [];
+      // Locked nodes survive; their connections to removed nodes are pruned
+      const kept = dlg.nodes.filter((n) => n.locked);
+      const keptIds = new Set(kept.map((n) => n.id));
+      kept.forEach((n) => {
+        n.connections = (n.connections || [])
+          .map(State.normalizeConnection)
+          .filter((c) => keptIds.has(c.targetId));
+      });
+      dlg.nodes = kept;
       dlg.startNodeId = null;
+      preservedLocked = kept.length;
     }
 
     const idMap = {};
@@ -334,7 +365,7 @@ export function writeDialogueGraph(payload = {}) {
 
     if (!isAppend) layoutTree(dlg);
 
-    return {
+    const result = {
       dialogueId: dlg.id,
       created: creating,
       mode: creating ? 'create' : mode,
@@ -342,6 +373,11 @@ export function writeDialogueGraph(payload = {}) {
       startNodeId: dlg.startNodeId,
       idMap,
     };
+    if (preservedLocked > 0) {
+      result.preservedLockedNodes = preservedLocked;
+      result.note = `${preservedLocked} locked node(s) (🔒) were preserved — they are protected from AI rewrites.`;
+    }
+    return result;
   } finally {
     State.endBatch();
   }
@@ -570,6 +606,7 @@ const tools = {
   update_node({ node_id, text_es, text_en, npc_name, condition, action, dialogue_id }) {
     const dlg = resolveDialogue(dialogue_id);
     const node = requireNode(dlg, node_id);
+    if (node.locked) throw new Error(`Node ${node_id} is locked (🔒) — the author protected it from AI edits. Ask them to unlock it in the editor if the change is needed.`);
     State.startBatch();
     try {
       if (text_es !== undefined || text_en !== undefined) {
@@ -621,6 +658,8 @@ const tools = {
 
   delete_node({ node_id, dialogue_id }) {
     const dlg = resolveDialogue(dialogue_id);
+    const node = requireNode(dlg, node_id);
+    if (node.locked) throw new Error(`Node ${node_id} is locked (🔒) — the author protected it from AI deletion. Ask them to unlock it in the editor if removal is needed.`);
     State.startBatch();
     try {
       removeNodeFrom(dlg, node_id);
