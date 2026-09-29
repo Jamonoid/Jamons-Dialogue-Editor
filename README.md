@@ -9,7 +9,7 @@ Editor visual de árboles de diálogo construido para desarrollo de videojuegos.
 ### Editor Visual de Diálogos
 - Canvas basado en nodos para crear y conectar líneas de diálogo
 - **Controles estilo Unreal Engine**: arrastre con clic derecho = mover la vista, arrastre con clic izquierdo = rectángulo de selección (Shift añade a la selección), rueda = zoom, clic derecho sin arrastrar = menú contextual
-- Posicionamiento de nodos con arrastrar y soltar, con auto-layout para árboles ramificados
+- Posicionamiento de nodos con arrastrar y soltar, con **auto-layout de árbol ordenado**: cada rama ocupa su propia columna en el orden de las opciones, las respuestas donde convergen varias ramas se centran debajo de ellas, los bucles de vuelta a un menú no deforman el árbol y cada fila mide lo que su nodo más alto — ningún nodo se superpone. Las cajas de comentario se reajustan alrededor de sus nodos (y las ramas hermanas de una misma caja se mantienen juntas)
 - Edición de texto inline en el canvas o en el panel inspector
 - Ramificación condicional con condiciones `IF` y acciones `DO` en las conexiones (Solo visual)
 - Multi-selección, duplicación y eliminación en lote de nodos
@@ -24,6 +24,7 @@ Editor visual de árboles de diálogo construido para desarrollo de videojuegos.
 - **Color por comentario**: presets en el menú contextual (clic derecho en el título) o selector libre en el inspector
 - Los títulos se agrandan al alejar el zoom (como en UE) para funcionar como etiquetas de región legibles
 - Delete elimina la caja seleccionada (los nodos que contiene no se tocan); todo es deshacible y se guarda con el proyecto
+- La IA las lee como **secciones** (título + nodos contenidos) en el chat y el MCP, y puede crearlas y editarlas vía MCP
 
 ### Mapa de Historia (🗺 Historia)
 - Segunda vista del canvas (pestañas **🗨 Diálogo | 🗺 Historia** sobre el lienzo) para estructurar la historia completa como un grafo de quests
@@ -78,10 +79,11 @@ claude mcp add --transport http --scope user dialogue-forge http://127.0.0.1:474
 ```
 
 Cubre el proyecto completo — una IA puede construir una historia entera de punta a punta:
-- **Lectura**: `get_project_summary`, `get_dialogue`, `get_story_map` (estructura de quests con condiciones y relacionados), `validate_dialogue`, `validate_story`
-- **Diálogos**: `write_dialogue_graph` (árbol completo en una llamada), más tools granulares (`add_node`, `connect_nodes`, `update_node`...)
+- **Lectura**: `get_project_summary`, `get_dialogue` (incluye las cajas de comentario como secciones), `get_story_map` (estructura de quests con condiciones y relacionados), `validate_dialogue`, `validate_story`
+- **Diálogos**: `write_dialogue_graph` (árbol completo en una llamada, con sus cajas de sección vía `comment_boxes`), más tools granulares (`add_node` con colocación `below`/`right_of`, `connect_nodes`, `update_node`...)
 - **Mapa de historia**: `write_story_map` (grafo completo en una llamada), `add/update/delete_story_node`, `connect/disconnect_story_nodes` (con la condición sobre la flecha), `set_story_start`
 - **Relacionados**: `update_quest_relations` (NPCs y diálogos vinculados a cada quest)
+- **Layout y cajas de comentario** (en diálogos y en el mapa de historia con `dialogue_id: "story"`): `get_layout` (posiciones y tamaños de nodos y cajas, más diagnóstico de solapamientos y nodos cortados por el borde de una caja), `auto_layout` (árbol ordenado, con espaciado `compact`/`normal`/`wide`), `move_nodes` (posiciones absolutas, desplazamientos o "debajo de / a la derecha de" otro nodo, en lote), `add/update/delete_comment_box` (envolver nodos, renombrar, recolorear, mover la caja con su contenido)
 - Las quests y NPCs referenciados por nombre se crean solos si no existen; todo es deshacible con Ctrl+Z en la app
 
 ### Audio Slicer
@@ -150,7 +152,8 @@ Dialogues/
       helpers.js     Helpers de DOM, escape de strings, generación de UIDs
     modules/
       state.js       Gestión central del estado, deshacer/rehacer, persistencia
-      canvas.js      Renderizado del canvas, pan/zoom, layout de nodos
+      canvas.js      Renderizado del canvas, pan/zoom, conexiones
+      layout.js      Geometría compartida: auto-layout de árbol, medición de nodos, cajas de comentario
       nodes.js       Renderizado de nodos en DOM, edición inline, resize
       inspector.js   Panel derecho para editar propiedades de nodo/NPC/quest
       sidebar.js     Panel izquierdo con listas de NPCs/quests/diálogos

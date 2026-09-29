@@ -9,6 +9,7 @@ import { showContextMenu, toast } from './ui.js';
 import * as State from './state.js';
 import { normalizeConnection } from './state.js';
 import { isSnapEnabled, consumeRmbPan, syncSelectionVisuals } from './canvas.js';
+import { COMMENT_COLORS, getNodesInComment, getCommentsInComment } from './layout.js';
 
 /**
  * Blur any focused inline textarea. Interactions that end up mutating the
@@ -44,17 +45,6 @@ let commentContainedNodes = {};    // nodeId → start pos (group movement)
 let commentContainedComments = {}; // nested commentId → start pos
 let resizingCommentId = null;
 let commentResizeStart = { x: 0, y: 0, width: 0, height: 0 };
-
-// UE comment palette (context menu presets; free color via inspector)
-export const COMMENT_COLORS = [
-  { name: 'Gris', value: '#94a2b3' },
-  { name: 'Rojo', value: '#e06c75' },
-  { name: 'Naranja', value: '#e5934a' },
-  { name: 'Amarillo', value: '#e5c07b' },
-  { name: 'Verde', value: '#98c379' },
-  { name: 'Azul', value: '#61afef' },
-  { name: 'Violeta', value: '#c678dd' },
-];
 
 // Store current callbacks & context
 let activeCallbacks = null;
@@ -350,29 +340,13 @@ export function setupNodeInteractions(dlg, callbacks) {
 
       // Capture nodes fully inside the box at drag start (like UE)
       commentContainedNodes = {};
-      dlg.nodes.forEach((n) => {
-        const el = $(`.dialogue-node[data-node-id="${n.id}"]`);
-        const nw = n.width || 240;
-        const nh = n.height || (el ? el.offsetHeight / currentZoom : 120);
-        if (
-          n.x >= comment.x && n.y >= comment.y &&
-          n.x + nw <= comment.x + comment.width &&
-          n.y + nh <= comment.y + comment.height
-        ) {
-          commentContainedNodes[n.id] = { x: n.x, y: n.y };
-        }
+      getNodesInComment(dlg, comment).forEach((n) => {
+        commentContainedNodes[n.id] = { x: n.x, y: n.y };
       });
       // Nested comment boxes fully inside also move along
       commentContainedComments = {};
-      (dlg.comments || []).forEach((c2) => {
-        if (
-          c2.id !== commentId &&
-          c2.x >= comment.x && c2.y >= comment.y &&
-          c2.x + c2.width <= comment.x + comment.width &&
-          c2.y + c2.height <= comment.y + comment.height
-        ) {
-          commentContainedComments[c2.id] = { x: c2.x, y: c2.y };
-        }
+      getCommentsInComment(dlg, comment).forEach((c2) => {
+        commentContainedComments[c2.id] = { x: c2.x, y: c2.y };
       });
 
       if (activeCallbacks.onCommentSelect) activeCallbacks.onCommentSelect(commentId);

@@ -9,7 +9,7 @@ import * as VectorMemory from './vector-memory.js';
 import { buildChatSystemPrompt } from './prompts.js';
 import { toast, confirmDelete } from './ui.js';
 // Shared with the MCP bridge so chat actions and MCP tools behave identically
-import { writeDialogueGraph, buildValidationReport, clearDialogueContent } from './mcp-bridge.js';
+import { writeDialogueGraph, buildValidationReport, clearDialogueContent, serializeCommentBoxes } from './mcp-bridge.js';
 
 // ─── MODULE STATE ─────────────────────────────────────
 let chatHistory = []; // [{role, content, actionSummary}]
@@ -57,10 +57,17 @@ function buildProjectContext() {
       return `    [ID:${n.id}] NPC:"${npc?.name || '-'}" ES:"${(n.text?.es || '').slice(0, textBudget)}" EN:"${(n.text?.en || '').slice(0, textBudget)}" → [${conns || 'no outgoing'}] ${flags}`;
     }).join('\n');
 
+    // Comment boxes = author-defined sections grouping nodes on the canvas
+    const sectionsText = serializeCommentBoxes(dlg)
+      .map((c) => `    "${c.text.slice(0, 200)}" → [${c.nodeIds.join(', ') || 'no nodes inside'}]`)
+      .join('\n');
+
     activeDlgText = `  Title:"${dlg.title}" [ID:${dlg.id}]${note(dlg)}
   Main NPC: ${dlgNpc?.name || 'none'}
   Nodes (${dlg.nodes.length}):
-${nodesText || '    (empty)'}`;
+${nodesText || '    (empty)'}${sectionsText ? `
+  Sections (author comment boxes grouping nodes):
+${sectionsText}` : ''}`;
   }
 
   const otherDlgs = state.dialogues
@@ -277,7 +284,7 @@ function executeActions(actions) {
           const res = writeDialogueGraph(action);
           Object.assign(tempIdMap, res.idMap); // later actions can reference the temp ids
           if (res.mode !== 'append' && res.dialogueId === State.getActiveDialogueId()) {
-            needsAutoLayout = true; // canvas layout is prettier than the built-in one
+            needsAutoLayout = true; // same layout, re-run with measured node heights + fit the view
           }
           summary.push(`✓ Dialogue graph written: ${res.nodeCount} nodes (${res.mode}) [dialogue ${res.dialogueId}]`);
           break;

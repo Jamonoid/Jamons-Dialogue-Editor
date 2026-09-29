@@ -7,6 +7,7 @@ import * as State from './state.js';
 import { normalizeConnection, updateConnectionLabel } from './state.js';
 import { renderNodes, setupNodeInteractions, registerGlobalHandlers } from './nodes.js';
 import { showContextMenu, showModal, toast } from './ui.js';
+import { relayoutGraph, graphBounds, DEFAULT_COMMENT_COLOR } from './layout.js';
 
 // ─── CANVAS STATE ────────────────────────────────────
 export let offset = { x: 0, y: 0 };
@@ -97,11 +98,17 @@ export function render() {
     const domNodeIds = new Set(
       [...nodesLayer.querySelectorAll('.dialogue-node')].map((el) => el.dataset.nodeId)
     );
+    const domCommentIds = new Set(
+      [...nodesLayer.querySelectorAll('.graph-comment')].map((el) => el.dataset.commentId)
+    );
+    const comments = dlg.comments || [];
     const structureChanged =
       dlg.nodes.length !== domNodeIds.size ||
       dlg.nodes.some((n) => !domNodeIds.has(n.id)) ||
-      (dlg.comments || []).length !== nodesLayer.querySelectorAll('.graph-comment').length;
+      comments.length !== domCommentIds.size ||
+      comments.some((c) => !domCommentIds.has(c.id));
     if (!structureChanged) {
+      syncGeometry(dlg, nodesLayer); // e.g. an MCP layout/move while the user types
       syncSelectionVisuals(dlg, nodesLayer);
       renderConnections();
       return;
@@ -161,6 +168,31 @@ export function render() {
     },
     offset,
     get zoom() { return zoom; },
+  });
+}
+
+/** Positions/sizes of the EXISTING node & comment DOM from state (no rebuild — focus survives). */
+function syncGeometry(dlg, nodesLayer) {
+  const nodes = new Map(dlg.nodes.map((n) => [n.id, n]));
+  nodesLayer.querySelectorAll('.dialogue-node').forEach((el) => {
+    const n = nodes.get(el.dataset.nodeId);
+    if (!n) return;
+    el.style.left = n.x + 'px';
+    el.style.top = n.y + 'px';
+  });
+  const boxes = new Map((dlg.comments || []).map((c) => [c.id, c]));
+  nodesLayer.querySelectorAll('.graph-comment').forEach((el) => {
+    const c = boxes.get(el.dataset.commentId);
+    if (!c) return;
+    el.style.left = c.x + 'px';
+    el.style.top = c.y + 'px';
+    el.style.width = c.width + 'px';
+    el.style.height = c.height + 'px';
+    el.style.setProperty('--comment-color', c.color || DEFAULT_COMMENT_COLOR);
+    const title = el.querySelector('.graph-comment-title');
+    if (title && !title.querySelector('input') && title.textContent !== (c.text || '')) {
+      title.textContent = c.text || '';
+    }
   });
 }
 
@@ -607,197 +639,34 @@ export function setup() {
 
 function resetView() { zoom = 1; offset.x = 0; offset.y = 0; applyTransform(); renderConnections(); }
 
-// ─── AUTO-LAYOUT (BFS jerárquico centrado y sin solapamientos) ───────────
+// ─── AUTO-LAYOUT (tidy tree — see layout.js) ─────────
 export function autoLayout() {
-  const dlg = State.getActiveGraph();
-  if (!dlg || dlg.nodes.length === 0) return;
-
-  const NODE_W = 260;
-  const NODE_H = 160;
-  const COL_GAP = 80;  // horizontal gap between siblings
-  const ROW_GAP = 100; // vertical gap between levels
-
-  // Build adjacency
-  const childrenOf = {};
-  dlg.nodes.forEach((n) => { childrenOf[n.id] = []; });
-  dlg.nodes.forEach((n) => {
-    (n.connections || []).forEach((rawConn) => {
-      const { targetId } = normalizeConnection(rawConn);
-      if (childrenOf[targetId] !== undefined) {
-        childrenOf[n.id].push(targetId);
-      }
-    });
-  });
-
-  // BFS to assign levels
-  const levels = {};
-  const visited = new Set();
-  const startId = dlg.startNodeId || dlg.nodes[0].id;
-  const queue = [startId];
-  levels[startId] = 0;
-  visited.add(startId);
-
-  while (queue.length > 0) {
-    const nodeId = queue.shift();
-    const lvl = levels[nodeId];
-    (childrenOf[nodeId] || []).forEach((childId) => {
-      if (!visited.has(childId)) {
-        visited.add(childId);
-        levels[childId] = lvl + 1;
-        queue.push(childId);
-      }
-    });
-  }
-
-  // Handle orphans (unreachable nodes)
-  const maxLvl = Math.max(0, ...Object.values(levels));
-  const orphanLevel = maxLvl + 1;
-  dlg.nodes.forEach((n) => {
-    if (!visited.has(n.id)) {
-      levels[n.id] = orphanLevel;
-      visited.add(n.id);
-    }
-  });
-
-  // Group nodes by level
-  const levelNodes = {};
-  dlg.nodes.forEach((n) => {
-    const lvl = levels[n.id];
-    if (!levelNodes[lvl]) levelNodes[lvl] = [];
-    levelNodes[lvl].push(n.id);
-  });
-
-  const PADDING_Y = 80;
-  const pos = {};
-
-  // Initialize root
-  pos[startId] = { x: 400, y: PADDING_Y };
-
-  // Calculate maximum level
-  const allLevels = Object.keys(levelNodes).map(Number).sort((a, b) => a - b);
-
-  // Initial layout: top-down parent-centered distribution
-  allLevels.forEach((lvl) => {
-    const nodeIds = levelNodes[lvl] || [];
-    nodeIds.forEach((parentId) => {
-      // Get children of this parent that are in the next level and not positioned yet
-      const children = (childrenOf[parentId] || []).filter(
-        (childId) => levels[childId] === lvl + 1 && pos[childId] === undefined
-      );
-
-      if (children.length > 0) {
-        const parentPos = pos[parentId] || { x: 400, y: PADDING_Y + lvl * (NODE_H + ROW_GAP) };
-        const parentCenterX = parentPos.x + NODE_W / 2;
-        const totalW = children.length * NODE_W + (children.length - 1) * COL_GAP;
-        let startX = parentCenterX - totalW / 2;
-
-        children.forEach((childId) => {
-          pos[childId] = {
-            x: startX,
-            y: PADDING_Y + (lvl + 1) * (NODE_H + ROW_GAP),
-          };
-          startX += NODE_W + COL_GAP;
-        });
-      }
-    });
-  });
-
-  // Position any nodes that somehow missed positioning (e.g. orphans)
-  dlg.nodes.forEach((n) => {
-    if (pos[n.id] === undefined) {
-      const lvl = levels[n.id];
-      const siblings = levelNodes[lvl] || [];
-      const index = siblings.indexOf(n.id);
-      const totalW = siblings.length * NODE_W + (siblings.length - 1) * COL_GAP;
-      const startX = 400 - totalW / 2;
-      pos[n.id] = {
-        x: startX + index * (NODE_W + COL_GAP),
-        y: PADDING_Y + lvl * (NODE_H + ROW_GAP),
-      };
-    }
-  });
-
-  // Resolve overlaps level by level (left to right)
-  allLevels.forEach((lvl) => {
-    const nodeIds = levelNodes[lvl] || [];
-    // Sort by current X position
-    nodeIds.sort((a, b) => pos[a].x - pos[b].x);
-
-    for (let i = 1; i < nodeIds.length; i++) {
-      const prevId = nodeIds[i - 1];
-      const currId = nodeIds[i];
-      const minX = pos[prevId].x + NODE_W + COL_GAP;
-      if (pos[currId].x < minX) {
-        pos[currId].x = minX;
-      }
-    }
-  });
-
-  // Bottom-up pass to center parents over their children
-  for (let i = allLevels.length - 2; i >= 0; i--) {
-    const lvl = allLevels[i];
-    const nodeIds = levelNodes[lvl] || [];
-
-    nodeIds.forEach((parentId) => {
-      const children = (childrenOf[parentId] || []).filter(
-        (childId) => levels[childId] === lvl + 1
-      );
-
-      if (children.length > 0) {
-        // Find bounds of children
-        let minX = Infinity;
-        let maxX = -Infinity;
-        children.forEach((childId) => {
-          const cx = pos[childId].x;
-          if (cx < minX) minX = cx;
-          if (cx > maxX) maxX = cx;
-        });
-        const midX = (minX + maxX) / 2;
-        pos[parentId].x = midX;
-
-        // Resolve overlaps again for this level after shifting the parent
-        const siblings = levelNodes[lvl] || [];
-        siblings.sort((a, b) => pos[a].x - pos[b].x);
-        for (let j = 1; j < siblings.length; j++) {
-          const prevId = siblings[j - 1];
-          const currId = siblings[j];
-          const minX = pos[prevId].x + NODE_W + COL_GAP;
-          if (pos[currId].x < minX) {
-            pos[currId].x = minX;
-          }
-        }
-      }
-    });
-  }
-
-  // Apply final positions
+  const graph = State.getActiveGraph();
+  if (!graph || graph.nodes.length === 0) return;
   State.startBatch();
-  dlg.nodes.forEach((n) => {
-    if (pos[n.id] !== undefined) {
-      State.updateNodePosition(n.id, pos[n.id].x, pos[n.id].y);
-    }
-  });
-  State.endBatch();
-
+  try {
+    relayoutGraph(graph); // comment boxes are refit around their nodes
+  } finally {
+    State.endBatch();
+  }
   render();
   fitView();
 }
 
-function fitView() {
-  const dlg = State.getActiveGraph();
-  if (!dlg || dlg.nodes.length === 0) { resetView(); return; }
+export function fitView() {
+  const graph = State.getActiveGraph();
+  const bounds = graph && graph.nodes.length ? graphBounds(graph) : null;
+  if (!bounds) { resetView(); return; }
   const container = $('#canvas-container');
   const rect = container.getBoundingClientRect();
   const padding = 80;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  dlg.nodes.forEach((n) => { minX = Math.min(minX, n.x); minY = Math.min(minY, n.y); maxX = Math.max(maxX, n.x + 260); maxY = Math.max(maxY, n.y + 160); });
-  const contentW = maxX - minX || 1;
-  const contentH = maxY - minY || 1;
+  const contentW = bounds.w || 1;
+  const contentH = bounds.h || 1;
   const availW = rect.width - padding * 2;
   const availH = rect.height - padding * 2;
   zoom = Math.min(1.5, Math.min(availW / contentW, availH / contentH));
-  offset.x = padding + (availW - contentW * zoom) / 2 - minX * zoom;
-  offset.y = padding + (availH - contentH * zoom) / 2 - minY * zoom;
+  offset.x = padding + (availW - contentW * zoom) / 2 - bounds.x * zoom;
+  offset.y = padding + (availH - contentH * zoom) / 2 - bounds.y * zoom;
   applyTransform();
   renderConnections();
 }

@@ -8,14 +8,24 @@
  * Every edit tool accepts an optional dialogue_id; when omitted it targets
  * the active dialogue. Edits on non-active dialogues mutate state directly
  * (inside a batch) without touching the canvas camera or selection.
+ * Layout / comment-box tools also accept dialogue_id "story" (the story map).
  *
  * The graph/validation/clear helpers are exported so the in-app chat
  * executor (chat.js) can reuse the exact same logic.
  */
 import * as State from './state.js';
 import { uid } from '../utils/helpers.js';
+import {
+  getNodeRect, getNodesInComment, getCommentsInComment, snapshotMembership, wrapRects,
+  refitComments, relayoutGraph, placeNewNodesBlock, graphBounds, findOverlaps, rectsOverlap,
+  relativePosition, findFreeSpot, DEFAULT_GAP, COMMENT_COLORS, DEFAULT_COMMENT_COLOR, COMMENT_MIN,
+} from './layout.js';
 
-let _autoLayout = null;
+let _fitView = null;
+
+const STORY_ID = 'story';
+const SPACINGS = ['compact', 'normal', 'wide'];
+const PLACEMENTS = ['below', 'above', 'right_of', 'left_of'];
 
 // ─── HELPERS ─────────────────────────────────────────
 
@@ -49,10 +59,151 @@ export function resolveDialogue(dialogueId) {
   return dlg;
 }
 
+/** Like resolveDialogue, but dialogue_id "story" selects the story map. */
+function resolveGraph(dialogueId) {
+  return dialogueId === STORY_ID ? State.getStory() : resolveDialogue(dialogueId);
+}
+
+/** How results name the graph they touched. */
+function graphRef(graph) {
+  return graph.id === STORY_ID ? { graph: 'story' } : { dialogueId: graph.id, title: graph.title };
+}
+
 function requireNode(dlg, nodeId) {
   const node = dlg.nodes.find((n) => n.id === nodeId);
-  if (!node) throw new Error(`Node not found in dialogue "${dlg.title}" (${dlg.id}): ${nodeId}`);
+  if (!node) {
+    const where = dlg.id === STORY_ID ? 'the story map' : `dialogue "${dlg.title}" (${dlg.id})`;
+    throw new Error(`Node not found in ${where}: ${nodeId}`);
+  }
   return node;
+}
+
+function requireCommentBox(graph, commentId) {
+  const box = (graph.comments || []).find((c) => c.id === commentId);
+  if (!box) throw new Error(`Comment box not found: ${commentId}. List them with get_layout.`);
+  return box;
+}
+
+// Preset names (ES + EN) of the comment palette, or any #rgb / #rrggbb hex
+const COLOR_NAMES = {
+  gris: '#94a2b3', gray: '#94a2b3', grey: '#94a2b3',
+  rojo: '#e06c75', red: '#e06c75',
+  naranja: '#e5934a', orange: '#e5934a',
+  amarillo: '#e5c07b', yellow: '#e5c07b',
+  verde: '#98c379', green: '#98c379',
+  azul: '#61afef', blue: '#61afef',
+  violeta: '#c678dd', violet: '#c678dd', purple: '#c678dd',
+};
+
+function resolveColor(color) {
+  const key = String(color).trim().toLowerCase();
+  if (COLOR_NAMES[key]) return COLOR_NAMES[key];
+  if (/^#[0-9a-f]{6}$/.test(key)) return key;
+  if (/^#[0-9a-f]{3}$/.test(key)) return '#' + [...key.slice(1)].map((c) => c + c).join('');
+  throw new Error(`Invalid color "${color}". Use a hex like #61afef or a preset: ${COMMENT_COLORS.map((c) => c.name.toLowerCase()).join(', ')}`);
+}
+
+const intRect = (r) => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) });
+const boxRect = (c) => ({ x: c.x, y: c.y, w: c.width, h: c.height });
+
+/** Re-fit the camera when the graph that just changed is the one on screen. */
+function fitIfShown(graph) {
+  if (_fitView && graph === State.getActiveGraph()) _fitView();
+}
+
+function checkFinite(value, label) {
+  if (value !== undefined && !Number.isFinite(value)) throw new Error(`${label} must be a number`);
+}
+
+/**
+ * Put `node` next to the node `refId` (below → siblings fan out to the right,
+ * right_of → they stack downwards) without landing on top of another node.
+ */
+function placeNear(graph, node, where, refId) {
+  const ref = getNodeRect(requireNode(graph, refId));
+  const r = getNodeRect(node);
+  const vertical = where === 'below' || where === 'above';
+  const p = relativePosition(ref, r.w, r.h, where, vertical ? DEFAULT_GAP.row : DEFAULT_GAP.col);
+  const free = findFreeSpot(graph, { ...r, x: p.x, y: p.y }, {
+    axis: vertical ? 'x' : 'y',
+    gap: vertical ? DEFAULT_GAP.col : DEFAULT_GAP.row / 2,
+    excludeId: node.id,
+  });
+  node.x = Math.round(free.x);
+  node.y = Math.round(free.y);
+}
+
+/**
+ * Validate a comment_boxes payload (before mutating). Entries:
+ * { id?, text?, nodes: [...], color? } — id re-targets an existing box of the
+ * graph (keeping its text/color unless given), otherwise a new box is created.
+ */
+function validateCommentBoxSpecs(specs, known, graph) {
+  if (specs === undefined || specs === null) return [];
+  if (!Array.isArray(specs)) throw new Error('comment_boxes must be an array');
+  const existing = new Set((graph?.comments || []).map((c) => c.id));
+  const seen = new Set();
+  specs.forEach((b, i) => {
+    if (!b || !Array.isArray(b.nodes) || !b.nodes.length) {
+      throw new Error(`comment_boxes[${i}] needs a non-empty "nodes" array`);
+    }
+    b.nodes.forEach((id) => {
+      if (!known(id)) throw new Error(`comment_boxes[${i}] references unknown node: ${id}`);
+    });
+    if (b.id !== undefined) {
+      if (!existing.has(b.id)) throw new Error(`comment_boxes[${i}]: no existing comment box with id ${b.id}`);
+      if (seen.has(b.id)) throw new Error(`comment_boxes[${i}]: comment box ${b.id} listed twice`);
+      seen.add(b.id);
+    } else if (!String(b.text ?? '').trim()) {
+      throw new Error(`comment_boxes[${i}] needs "text" (the title shown on the box)`);
+    }
+    if (b.color !== undefined) resolveColor(b.color);
+  });
+  return specs;
+}
+
+/** Create / re-target the boxes of a validated payload; records their members. Returns their ids. */
+function applyCommentBoxSpecs(graph, specs, real, members) {
+  const ids = new Set();
+  if (!specs.length) return ids;
+  if (!Array.isArray(graph.comments)) graph.comments = [];
+  specs.forEach((b) => {
+    let box = b.id !== undefined ? graph.comments.find((c) => c.id === b.id) : null;
+    if (!box) {
+      // Placeholder rect — refitComments wraps it around its nodes after layout
+      box = { id: uid(), text: '', x: 0, y: 0, width: COMMENT_MIN.w, height: COMMENT_MIN.h, color: DEFAULT_COMMENT_COLOR };
+      graph.comments.push(box);
+    }
+    if (String(b.text ?? '').trim()) box.text = String(b.text).trim();
+    if (b.color !== undefined) box.color = resolveColor(b.color);
+    members.set(box.id, new Set(b.nodes.map(real)));
+    ids.add(box.id);
+  });
+  return ids;
+}
+
+/**
+ * Shared tail of the graph writers: lay out (full tidy tree, or the new nodes
+ * as a block beside an untouched graph) and fit the comment boxes. Adds
+ * commentBoxes / parkedCommentBoxes to `result`.
+ */
+function layoutWrittenGraph(graph, { full, newIds, boxIds, members, result }) {
+  let report;
+  if (full) {
+    report = relayoutGraph(graph, { membership: members });
+  } else {
+    placeNewNodesBlock(graph, newIds, { membership: members });
+    report = refitComments(graph, members, { only: boxIds });
+  }
+  const shown = full ? report.comments : report.comments.filter((c) => boxIds.has(c.id));
+  if (shown.length) result.commentBoxes = shown;
+  if (report.parked.length) {
+    result.parkedCommentBoxes = report.parked;
+    result.parkedNote = 'These existing comment boxes lost all their nodes and were parked (shrunk) left of the graph. Re-target them with comment_boxes [{id, nodes}] / update_comment_box(node_ids), or delete them with delete_comment_box.';
+  }
+  if ((result.commentBoxes || []).some((c) => c.foreignNodeIds)) {
+    result.layoutHint = 'Some boxes also contain nodes outside their section (foreignNodeIds): their nodes are not contiguous in the tree. Consider regrouping, or move_nodes + update_comment_box(node_ids).';
+  }
 }
 
 function makeNode(x, y) {
@@ -134,46 +285,6 @@ function nextNodePosition(dlg) {
   return { x: 300, y: baseY };
 }
 
-/**
- * Simple layered BFS layout: levels go down, siblings spread horizontally.
- * Used when writing whole graphs (deterministic, works on non-active dialogues).
- * The canvas auto-layout (parent-centered) is still used by the auto_layout
- * tool when the target is the active dialogue.
- */
-export function layoutTree(dlg) {
-  if (!dlg.nodes.length) return;
-  const byId = new Map(dlg.nodes.map((n) => [n.id, n]));
-  const startId = dlg.startNodeId && byId.has(dlg.startNodeId) ? dlg.startNodeId : dlg.nodes[0].id;
-  const levels = new Map([[startId, 0]]);
-  const queue = [startId];
-  while (queue.length) {
-    const id = queue.shift();
-    (byId.get(id).connections || []).forEach((c) => {
-      const t = State.normalizeConnection(c).targetId;
-      if (byId.has(t) && !levels.has(t)) {
-        levels.set(t, levels.get(id) + 1);
-        queue.push(t);
-      }
-    });
-  }
-  let maxLvl = 0;
-  levels.forEach((l) => { if (l > maxLvl) maxLvl = l; });
-  dlg.nodes.forEach((n) => { if (!levels.has(n.id)) levels.set(n.id, maxLvl + 1); });
-
-  const rows = new Map();
-  dlg.nodes.forEach((n) => {
-    const lvl = levels.get(n.id);
-    if (!rows.has(lvl)) rows.set(lvl, []);
-    rows.get(lvl).push(n);
-  });
-  rows.forEach((rowNodes, lvl) => {
-    rowNodes.forEach((n, i) => {
-      n.x = 400 + (i - (rowNodes.length - 1) / 2) * 340;
-      n.y = 80 + lvl * 260;
-    });
-  });
-}
-
 // ─── SERIALIZATION ───────────────────────────────────
 
 function npcName(npcId) {
@@ -202,7 +313,23 @@ function serializeFull(dlg) {
         return { targetId: conn.targetId, label: conn.label || '' };
       }),
     })),
+    commentBoxes: serializeCommentBoxes(dlg),
   };
+}
+
+/**
+ * Comment boxes as author-defined sections: title + ids of the nodes fully
+ * inside (nested boxes → a node can appear in several). Reading order top→bottom.
+ */
+export function serializeCommentBoxes(graph) {
+  return (graph?.comments || [])
+    .slice()
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .map((c) => ({
+      id: c.id,
+      text: c.text || '',
+      nodeIds: getNodesInComment(graph, c).map((n) => n.id),
+    }));
 }
 
 function collectEdges(dlg) {
@@ -236,12 +363,14 @@ function serializeCompact(dlg) {
     edges: collectEdges(dlg),
   };
   if (dlg.comment) out.comment = dlg.comment;
+  const boxes = serializeCommentBoxes(dlg);
+  if (boxes.length) out.commentBoxes = boxes;
   return out;
 }
 
-/** Structure only — ids, speakers and edges. No text. */
+/** Structure only — ids, speakers, edges and section boxes. No node text. */
 function serializeStructure(dlg) {
-  return {
+  const out = {
     id: dlg.id,
     title: dlg.title,
     start: dlg.startNodeId,
@@ -254,6 +383,9 @@ function serializeStructure(dlg) {
     }),
     edges: collectEdges(dlg),
   };
+  const boxes = serializeCommentBoxes(dlg);
+  if (boxes.length) out.commentBoxes = boxes;
+  return out;
 }
 
 // ─── GRAPH WRITER (shared with chat.js) ──────────────
@@ -266,7 +398,9 @@ function serializeStructure(dlg) {
  *   mode?: 'replace' | 'append',      // default 'replace' — clears existing nodes first
  *   nodes: [{ id, text_es?, text_en?, npc?, condition?, action? }],   // id = caller's temp id
  *   connections?: [{ from, to, label? }],   // temp ids, or real node ids in append mode
- *   start?: tempId | realId
+ *   start?: tempId | realId,
+ *   comment_boxes?: [{ id?, text?, nodes: [ids], color? }],  // section boxes wrapped around nodes
+ *   layout?: 'auto' | 'full'   // auto: full tidy layout, except append → new nodes as a block
  * }
  * Validates everything up front (atomic: throws before mutating on bad payloads),
  * maps temp ids → real ids and lays out the tree. Returns { dialogueId, idMap, ... }.
@@ -280,6 +414,9 @@ export function writeDialogueGraph(payload = {}) {
   const questNameArg = payload.quest_name ?? payload.quest;
   const mode = payload.mode === 'append' ? 'append' : 'replace';
   const creating = !!(title && String(title).trim());
+  if (payload.layout !== undefined && !['auto', 'full'].includes(payload.layout)) {
+    throw new Error('layout must be "auto" or "full"');
+  }
 
   if (!Array.isArray(nodes) || nodes.length === 0) {
     throw new Error('nodes must be a non-empty array');
@@ -314,6 +451,9 @@ export function writeDialogueGraph(payload = {}) {
     if (e.from === e.to) throw new Error(`Cannot connect a node to itself: ${e.from}`);
   });
   if (start && !known(start)) throw new Error(`start references unknown node: ${start}`);
+  const boxSpecs = validateCommentBoxSpecs(payload.comment_boxes, known, target);
+  // Which nodes every existing box holds — taken before anything moves
+  const members = target ? snapshotMembership(target) : new Map();
 
   State.startBatch();
   try {
@@ -363,8 +503,6 @@ export function writeDialogueGraph(payload = {}) {
     if (start) dlg.startNodeId = real(start);
     else if (!dlg.startNodeId) dlg.startNodeId = real(nodes[0].id);
 
-    if (!isAppend) layoutTree(dlg);
-
     const result = {
       dialogueId: dlg.id,
       created: creating,
@@ -373,6 +511,14 @@ export function writeDialogueGraph(payload = {}) {
       startNodeId: dlg.startNodeId,
       idMap,
     };
+    const boxIds = applyCommentBoxSpecs(dlg, boxSpecs, real, members);
+    layoutWrittenGraph(dlg, {
+      full: !isAppend || payload.layout === 'full',
+      newIds: Object.values(idMap),
+      boxIds,
+      members,
+      result,
+    });
     if (preservedLocked > 0) {
       result.preservedLockedNodes = preservedLocked;
       result.note = `${preservedLocked} locked node(s) (🔒) were preserved — they are protected from AI rewrites.`;
@@ -505,7 +651,10 @@ const tools = {
       };
     });
 
-    return { start: story.startNodeId, nodes, edges, quests };
+    const out = { start: story.startNodeId, nodes, edges, quests };
+    const boxes = serializeCommentBoxes(story);
+    if (boxes.length) out.commentBoxes = boxes;
+    return out;
   },
 
   get_dialogue({ dialogue_id, format } = {}) {
@@ -580,11 +729,21 @@ const tools = {
   },
 
   write_dialogue_graph(args) {
-    return writeDialogueGraph(args || {});
+    const result = writeDialogueGraph(args || {});
+    if (result.mode !== 'append' || args?.layout === 'full') {
+      fitIfShown((State.getState().dialogues || []).find((d) => d.id === result.dialogueId));
+    }
+    return result;
   },
 
-  add_node({ text_es, text_en, npc_name, condition, action, x, y, dialogue_id }) {
+  add_node({ text_es, text_en, npc_name, condition, action, x, y, below, right_of, dialogue_id }) {
     const dlg = resolveDialogue(dialogue_id);
+    const anchor = below ?? right_of;
+    if (below !== undefined && right_of !== undefined) throw new Error('Use either below or right_of, not both');
+    if (anchor !== undefined && (x !== undefined || y !== undefined)) throw new Error('Use x/y OR below/right_of, not both');
+    if (anchor !== undefined) requireNode(dlg, anchor);
+    checkFinite(x, 'x');
+    checkFinite(y, 'y');
     State.startBatch();
     try {
       const pos = nextNodePosition(dlg);
@@ -596,8 +755,9 @@ const tools = {
         const npc = findOrCreateNPC(npc_name);
         if (npc) node.npcId = npc.id;
       }
+      if (anchor !== undefined) placeNear(dlg, node, below !== undefined ? 'below' : 'right_of', anchor);
       dlg.nodes.push(node);
-      return { nodeId: node.id, dialogueId: dlg.id };
+      return { nodeId: node.id, dialogueId: dlg.id, x: node.x, y: node.y };
     } finally {
       State.endBatch();
     }
@@ -693,15 +853,226 @@ const tools = {
     return { npcId: npc.id, name: npc.name, alreadyExisted: false };
   },
 
-  auto_layout({ dialogue_id } = {}) {
-    const dlg = resolveDialogue(dialogue_id);
-    if (dlg.id === State.getActiveDialogueId() && _autoLayout) {
-      _autoLayout();
-    } else {
-      State.startBatch();
-      try { layoutTree(dlg); } finally { State.endBatch(); }
+  auto_layout({ dialogue_id, spacing } = {}) {
+    const graph = resolveGraph(dialogue_id);
+    if (spacing !== undefined && !SPACINGS.includes(spacing)) throw new Error(`spacing must be one of: ${SPACINGS.join(', ')}`);
+    if (!graph.nodes.length) return { ...graphRef(graph), nodeCount: 0 };
+    let report;
+    State.startBatch();
+    try {
+      report = relayoutGraph(graph, { spacing });
+    } finally {
+      State.endBatch();
     }
-    return { done: true, dialogueId: dlg.id };
+    fitIfShown(graph);
+    const out = { ...graphRef(graph), nodeCount: graph.nodes.length, bounds: intRect(graphBounds(graph)) };
+    if (report.comments.length) out.commentBoxes = report.comments;
+    if (report.parked.length) out.parkedCommentBoxes = report.parked;
+    return out;
+  },
+
+  // ─── LAYOUT & COMMENT BOXES ────────────────────────
+  // Coordinates are canvas pixels (x → right, y → down). Flow is top-down:
+  // a node's input connector is on its top edge, its output on the bottom.
+
+  get_layout({ dialogue_id } = {}) {
+    const graph = resolveGraph(dialogue_id);
+    const rects = graph.nodes.map((n) => ({ id: n.id, ...intRect(getNodeRect(n)) }));
+    const bounds = graphBounds(graph);
+    const out = { ...graphRef(graph), start: graph.startNodeId || null, bounds: bounds ? intRect(bounds) : null, nodes: rects };
+
+    const boxes = [];
+    const straddling = [];
+    (graph.comments || []).forEach((c) => {
+      const inside = new Set(getNodesInComment(graph, c).map((n) => n.id));
+      boxes.push({ id: c.id, text: c.text || '', ...intRect(boxRect(c)), color: c.color || DEFAULT_COMMENT_COLOR, nodeIds: [...inside] });
+      // Nodes cut by the box edge: they look grouped but won't move with the box
+      rects.forEach((r) => {
+        if (!inside.has(r.id) && rectsOverlap(r, boxRect(c), -2)) straddling.push([c.id, r.id]);
+      });
+    });
+    if (boxes.length) out.commentBoxes = boxes;
+    const overlaps = findOverlaps(graph);
+    if (overlaps.length) out.overlaps = overlaps;
+    if (straddling.length) out.straddling = straddling;
+    return out;
+  },
+
+  move_nodes({ dialogue_id, moves } = {}) {
+    const graph = resolveGraph(dialogue_id);
+    if (!Array.isArray(moves) || !moves.length) throw new Error('moves must be a non-empty array');
+    // Validate everything first — a bad entry aborts the whole call
+    moves.forEach((m, i) => {
+      if (!m || !m.node_id) throw new Error(`moves[${i}] needs node_id`);
+      requireNode(graph, m.node_id);
+      const rel = PLACEMENTS.filter((k) => m[k] !== undefined);
+      const abs = m.x !== undefined || m.y !== undefined;
+      if (rel.length > 1) throw new Error(`moves[${i}]: use only one of ${PLACEMENTS.join('/')}`);
+      if (rel.length && abs) throw new Error(`moves[${i}]: relative placement can't be combined with x/y (use dx/dy to nudge it)`);
+      if (!rel.length && !abs && m.dx === undefined && m.dy === undefined) {
+        throw new Error(`moves[${i}]: nothing to do — pass x/y, dx/dy or one of ${PLACEMENTS.join('/')}`);
+      }
+      ['x', 'y', 'dx', 'dy', 'gap'].forEach((k) => checkFinite(m[k], `moves[${i}].${k}`));
+      if (rel.length) {
+        if (m[rel[0]] === m.node_id) throw new Error(`moves[${i}]: a node can't be placed relative to itself`);
+        requireNode(graph, m[rel[0]]);
+      }
+    });
+
+    State.startBatch();
+    try {
+      const moved = [];
+      moves.forEach((m) => {
+        const node = requireNode(graph, m.node_id);
+        const where = PLACEMENTS.find((k) => m[k] !== undefined);
+        let nx = node.x;
+        let ny = node.y;
+        if (where) {
+          const r = getNodeRect(node);
+          const vertical = where === 'below' || where === 'above';
+          const gap = m.gap ?? (vertical ? DEFAULT_GAP.row : DEFAULT_GAP.col);
+          ({ x: nx, y: ny } = relativePosition(getNodeRect(requireNode(graph, m[where])), r.w, r.h, where, gap));
+        } else {
+          if (m.x !== undefined) nx = m.x;
+          if (m.y !== undefined) ny = m.y;
+        }
+        node.x = Math.round(nx + (m.dx || 0));
+        node.y = Math.round(ny + (m.dy || 0));
+        if (!moved.includes(node.id)) moved.push(node.id);
+      });
+      const out = {
+        ...graphRef(graph),
+        moved: moved.map((id) => {
+          const n = requireNode(graph, id);
+          return { id, x: n.x, y: n.y };
+        }),
+      };
+      const overlaps = findOverlaps(graph).filter(([a, b]) => moved.includes(a) || moved.includes(b));
+      if (overlaps.length) out.overlaps = overlaps;
+      return out;
+    } finally {
+      State.endBatch();
+    }
+  },
+
+  add_comment_box({ dialogue_id, text, node_ids, x, y, width, height, color } = {}) {
+    const graph = resolveGraph(dialogue_id);
+    const label = String(text ?? '').trim();
+    if (!label) throw new Error('text is required (the title shown on the box)');
+    const hex = color !== undefined ? resolveColor(color) : DEFAULT_COMMENT_COLOR;
+    ['x', 'y', 'width', 'height'].forEach((k) => checkFinite({ x, y, width, height }[k], k));
+
+    let rect;
+    if (Array.isArray(node_ids) && node_ids.length) {
+      const nodes = node_ids.map((id) => requireNode(graph, id));
+      const wanted = new Set(node_ids);
+      // Existing boxes whose nodes are all part of this one end up nested inside it
+      const inner = (graph.comments || []).filter((c) => {
+        const ids = getNodesInComment(graph, c).map((n) => n.id);
+        return ids.length && ids.length < wanted.size && ids.every((id) => wanted.has(id));
+      });
+      rect = wrapRects(nodes.map(getNodeRect), inner);
+    } else {
+      if (x === undefined || y === undefined) throw new Error('Pass node_ids (wrap those nodes) or explicit x and y');
+      rect = {
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.max(COMMENT_MIN.w, Math.round(width ?? 400)),
+        height: Math.max(COMMENT_MIN.h, Math.round(height ?? 260)),
+      };
+    }
+
+    State.startBatch();
+    try {
+      if (!Array.isArray(graph.comments)) graph.comments = [];
+      const box = { id: uid(), text: label, ...rect, color: hex };
+      graph.comments.push(box);
+      const inside = getNodesInComment(graph, box).map((n) => n.id);
+      const out = { commentId: box.id, ...graphRef(graph), ...intRect(boxRect(box)), nodeIds: inside };
+      if (Array.isArray(node_ids) && node_ids.length) {
+        const foreign = inside.filter((id) => !node_ids.includes(id));
+        if (foreign.length) {
+          out.foreignNodeIds = foreign;
+          out.hint = 'The box also covers nodes you did not list — move them out (move_nodes) or run auto_layout, then re-wrap with update_comment_box(node_ids).';
+        }
+      }
+      return out;
+    } finally {
+      State.endBatch();
+    }
+  },
+
+  update_comment_box({ dialogue_id, comment_id, text, color, node_ids, x, y, dx, dy, width, height, move_contents } = {}) {
+    const graph = resolveGraph(dialogue_id);
+    const box = requireCommentBox(graph, comment_id);
+    const moving = x !== undefined || y !== undefined || dx !== undefined || dy !== undefined;
+    const sizing = width !== undefined || height !== undefined;
+    if (node_ids !== undefined && (moving || sizing)) throw new Error('node_ids re-wraps the box — it can\'t be combined with x/y/dx/dy/width/height');
+    if ((x !== undefined || y !== undefined) && (dx !== undefined || dy !== undefined)) throw new Error('Use x/y OR dx/dy, not both');
+    ['x', 'y', 'dx', 'dy', 'width', 'height'].forEach((k) => checkFinite({ x, y, dx, dy, width, height }[k], k));
+    if (text !== undefined && !String(text).trim()) throw new Error('text can\'t be empty');
+    const hex = color !== undefined ? resolveColor(color) : undefined;
+    let wrapNodes = null;
+    if (node_ids !== undefined) {
+      if (!Array.isArray(node_ids) || !node_ids.length) throw new Error('node_ids must be a non-empty array');
+      wrapNodes = node_ids.map((id) => requireNode(graph, id));
+    }
+
+    State.startBatch();
+    try {
+      if (text !== undefined) box.text = String(text).trim();
+      if (hex) box.color = hex;
+      let movedNodes = 0;
+      if (wrapNodes) {
+        const wanted = new Set(node_ids);
+        const inner = (graph.comments || []).filter((c) => {
+          if (c === box) return false;
+          const ids = getNodesInComment(graph, c).map((n) => n.id);
+          return ids.length && ids.length < wanted.size && ids.every((id) => wanted.has(id));
+        });
+        Object.assign(box, wrapRects(wrapNodes.map(getNodeRect), inner));
+      } else {
+        const ddx = x !== undefined ? x - box.x : (dx || 0);
+        const ddy = y !== undefined ? y - box.y : (dy || 0);
+        if (ddx || ddy) {
+          // UE semantics: what is inside the box travels with it
+          if (move_contents !== false) {
+            const nodes = getNodesInComment(graph, box);
+            const nested = getCommentsInComment(graph, box);
+            nodes.forEach((n) => { n.x = Math.round(n.x + ddx); n.y = Math.round(n.y + ddy); });
+            nested.forEach((c) => { c.x = Math.round(c.x + ddx); c.y = Math.round(c.y + ddy); });
+            movedNodes = nodes.length;
+          }
+          box.x = Math.round(box.x + ddx);
+          box.y = Math.round(box.y + ddy);
+        }
+        if (width !== undefined) box.width = Math.max(COMMENT_MIN.w, Math.round(width));
+        if (height !== undefined) box.height = Math.max(COMMENT_MIN.h, Math.round(height));
+      }
+      const inside = getNodesInComment(graph, box).map((n) => n.id);
+      const out = { commentId: box.id, ...graphRef(graph), text: box.text, ...intRect(boxRect(box)), nodeIds: inside };
+      if (movedNodes) out.movedNodes = movedNodes;
+      if (wrapNodes) {
+        const foreign = inside.filter((id) => !node_ids.includes(id));
+        if (foreign.length) out.foreignNodeIds = foreign;
+      }
+      return out;
+    } finally {
+      State.endBatch();
+    }
+  },
+
+  delete_comment_box({ dialogue_id, comment_id } = {}) {
+    const graph = resolveGraph(dialogue_id);
+    const box = requireCommentBox(graph, comment_id);
+    State.startBatch();
+    try {
+      graph.comments = graph.comments.filter((c) => c.id !== comment_id);
+      if (State.getSelectedCommentId() === comment_id) State.setSelectedCommentId(null);
+      return { deleted: comment_id, text: box.text || '', ...graphRef(graph), note: 'Only the box was removed — its nodes are untouched.' };
+    } finally {
+      State.endBatch();
+    }
   },
 
   validate_dialogue({ dialogue_id } = {}) {
@@ -736,9 +1107,10 @@ const tools = {
   // work regardless of the current view; the canvas re-renders if the story
   // view is open. Edges carry the CONDITION for the next quest/step to start.
 
-  write_story_map({ mode, nodes = [], connections = [], start } = {}) {
+  write_story_map({ mode, nodes = [], connections = [], start, comment_boxes, layout } = {}) {
     const story = State.getStory();
     const isAppend = mode === 'append';
+    if (layout !== undefined && !['auto', 'full'].includes(layout)) throw new Error('layout must be "auto" or "full"');
 
     if (!Array.isArray(nodes) || nodes.length === 0) {
       throw new Error('nodes must be a non-empty array');
@@ -763,7 +1135,10 @@ const tools = {
       if (e.from === e.to) throw new Error(`Cannot connect a node to itself: ${e.from}`);
     });
     if (start && !known(start)) throw new Error(`start references unknown node: ${start}`);
+    const boxSpecs = validateCommentBoxSpecs(comment_boxes, known, story);
+    const members = snapshotMembership(story);
 
+    let result;
     State.startBatch();
     try {
       if (!isAppend) {
@@ -785,15 +1160,30 @@ const tools = {
       (connections || []).forEach((e) => upsertConnection(story, real(e.from), real(e.to), e.condition ?? e.label));
       if (start) story.startNodeId = real(start);
       else if (!story.startNodeId) story.startNodeId = real(nodes[0].id);
-      if (!isAppend) layoutTree(story);
-      return { mode: isAppend ? 'append' : 'replace', nodeCount: story.nodes.length, startNodeId: story.startNodeId, idMap };
+      result = { mode: isAppend ? 'append' : 'replace', nodeCount: story.nodes.length, startNodeId: story.startNodeId, idMap };
+      const boxIds = applyCommentBoxSpecs(story, boxSpecs, real, members);
+      layoutWrittenGraph(story, {
+        full: !isAppend || layout === 'full',
+        newIds: Object.values(idMap),
+        boxIds,
+        members,
+        result,
+      });
     } finally {
       State.endBatch();
     }
+    if (!isAppend || layout === 'full') fitIfShown(story);
+    return result;
   },
 
-  add_story_node({ quest, text_es, text_en, x, y } = {}) {
+  add_story_node({ quest, text_es, text_en, x, y, below, right_of } = {}) {
     const story = State.getStory();
+    const anchor = below ?? right_of;
+    if (below !== undefined && right_of !== undefined) throw new Error('Use either below or right_of, not both');
+    if (anchor !== undefined && (x !== undefined || y !== undefined)) throw new Error('Use x/y OR below/right_of, not both');
+    if (anchor !== undefined) requireNode(story, anchor);
+    checkFinite(x, 'x');
+    checkFinite(y, 'y');
     State.startBatch();
     try {
       const pos = nextNodePosition(story);
@@ -801,9 +1191,10 @@ const tools = {
       node.width = 320;
       node.questId = quest ? (findOrCreateQuest(quest)?.id || null) : null;
       node.text = { es: text_es || '', en: text_en || '' };
+      if (anchor !== undefined) placeNear(story, node, below !== undefined ? 'below' : 'right_of', anchor);
       story.nodes.push(node);
       if (!story.startNodeId) story.startNodeId = node.id;
-      return { nodeId: node.id, quest: quest || null };
+      return { nodeId: node.id, quest: quest || null, x: node.x, y: node.y };
     } finally {
       State.endBatch();
     }
@@ -953,17 +1344,19 @@ const tools = {
 
 // ─── SETUP ───────────────────────────────────────────
 
-export function setup(autoLayoutFn) {
-  _autoLayout = autoLayoutFn;
+export function setup({ fitView } = {}) {
+  _fitView = fitView || null;
 
-  // Tools that never go through view-dependent CRUD (reads + story-map tools,
-  // which mutate state.story directly): they must not yank the user out of
-  // the story map view.
+  // Tools that never go through view-dependent CRUD (reads, story-map tools
+  // and the layout/comment-box tools, which mutate the resolved graph
+  // directly): they must not yank the user out of the story map view.
   const VIEW_SAFE_TOOLS = new Set([
     'get_project_summary', 'get_dialogue', 'validate_dialogue',
     'get_story_map', 'write_story_map', 'add_story_node', 'update_story_node',
     'delete_story_node', 'connect_story_nodes', 'disconnect_story_nodes',
     'set_story_start', 'validate_story', 'update_quest_relations',
+    'get_layout', 'auto_layout', 'move_nodes',
+    'add_comment_box', 'update_comment_box', 'delete_comment_box',
   ]);
 
   window.__mcpExecute = async (toolName, args) => {

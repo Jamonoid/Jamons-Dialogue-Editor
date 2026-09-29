@@ -14,6 +14,7 @@ import { hideContextMenu, showAISettingsModal, showAIGenerateModal, showAILoadin
 import * as AI from './modules/ai.js';
 import * as Chat from './modules/chat.js';
 import * as McpBridge from './modules/mcp-bridge.js';
+import { wrapRects, getNodeRect } from './modules/layout.js';
 import * as AudioSlicer from './modules/audio-slicer.js';
 import * as VectorMemory from './modules/vector-memory.js';
 import * as MemoryMap from './modules/memory-map.js';
@@ -258,27 +259,8 @@ function setupKeyboard() {
         const selectedIds = [...State.getSelectedNodeIds()];
         if (selectedIds.length > 0) {
           // Bounding box of the selection + UE-like padding (extra room on top for the title)
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          selectedIds.forEach((id) => {
-            const n = graph.nodes.find((nn) => nn.id === id);
-            if (!n) return;
-            const el = document.querySelector(`.dialogue-node[data-node-id="${id}"]`);
-            const nw = n.width || 240;
-            const nh = n.height || (el ? el.offsetHeight / Canvas.zoom : 140);
-            minX = Math.min(minX, n.x);
-            minY = Math.min(minY, n.y);
-            maxX = Math.max(maxX, n.x + nw);
-            maxY = Math.max(maxY, n.y + nh);
-          });
-          if (minX !== Infinity) {
-            State.addComment({
-              x: minX - 30,
-              y: minY - 56,
-              width: (maxX - minX) + 60,
-              height: (maxY - minY) + 86,
-              text: 'Comentario',
-            });
-          }
+          const rect = wrapRects(graph.nodes.filter((n) => selectedIds.includes(n.id)).map(getNodeRect));
+          if (rect) State.addComment({ ...rect, text: 'Comentario' });
         } else {
           // No selection → default-sized box at the center of the view
           const rect = $('#canvas-container').getBoundingClientRect();
@@ -342,7 +324,7 @@ function init() {
   Chat.setup(renderAll, Canvas.autoLayout);
 
   // MCP bridge: lets Claude Code (via electron/mcp-server.js) drive the app
-  McpBridge.setup(Canvas.autoLayout);
+  McpBridge.setup({ fitView: Canvas.fitView });
 }
 
 init();
