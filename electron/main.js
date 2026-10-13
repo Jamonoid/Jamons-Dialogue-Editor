@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
+import os from 'os';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
@@ -148,54 +149,51 @@ ipcMain.handle('audio:write-files', async (event, { folderPath, files }) => {
 // Runs the user's installed `claude` CLI in print mode. The CLI uses the
 // user's own login (Claude Pro/Max subscription) — no API key needed.
 
-const CLAUDE_TIMEOUT_MS = 240_000;
-// Model comes from user config; validate so it's safe as a CLI argument
-// (on Windows we spawn through the shell to resolve claude.cmd/.exe).
-const MODEL_RE = /^[a-zA-Z0-9._-]+$/;
+const CONNECT_TIMEOUT_MS = 60_000;   // launch → first output from the API
+const IDLE_TIMEOUT_MS = 90_000;      // longest silence once Claude is answering
+const DEFAULT_CALL_TIMEOUT_MS = 300_000;
+const MAX_CALL_TIMEOUT_MS = 900_000;
 
-function runClaude(args, stdinText, timeoutMs = CLAUDE_TIMEOUT_MS) {
-  return new Promise((resolve) => {
-    const child = spawn('claude', args, {
-      shell: process.platform === 'win32',
-      windowsHide: true,
-      env: process.env,
-    });
+// Session variables of a parent Claude Code session (e.g. when the app was
+// started from one) would make the CLI behave as a nested child session.
+const PARENT_SESSION_ENV = [
+  'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_PID', 'CLAUDE_EFFORT',
+];
 
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    const done = (result) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(result);
-    };
+const activeClaudeCalls = new Map(); // requestId → cancel()
 
-    const timer = setTimeout(() => {
-      child.kill();
-      done({ ok: false, error: 'Claude Code no respondió a tiempo (timeout).' });
-    }, timeoutMs);
+// On Windows the CLI is spawned through the shell (claude.exe or an npm
+// claude.cmd), so arguments are quoted by hand.
+function winQuote(arg) {
+  if (arg === '') return '""';
+  return /[\s"&|<>^()%!]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg;
+}
 
-    child.stdout.on('data', (d) => { stdout += d; });
-    child.stderr.on('data', (d) => { stderr += d; });
+function spawnClaude(args, cwd) {
+  const env = { ...process.env };
+  PARENT_SESSION_ENV.forEach((k) => delete env[k]);
+  const opts = { windowsHide: true, env, cwd };
+  if (process.platform === 'win32') {
+    return spawn(['claude', ...args.map(winQuote)].join(' '), [], { ...opts, shell: true });
+  }
+  return spawn('claude', args, opts);
+}
 
-    child.on('error', (err) => {
-      const msg = err.code === 'ENOENT'
-        ? 'Claude Code no está instalado o no está en el PATH. Instálalo desde claude.com/claude-code.'
-        : `No se pudo ejecutar Claude Code: ${err.message}`;
-      done({ ok: false, error: msg });
-    });
+// With the Windows shell, child.kill() only kills cmd.exe and leaves the CLI running
+function killTree(child) {
+  if (!child || child.exitCode !== null) return;
+  if (process.platform === 'win32' && child.pid) {
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+  } else {
+    child.kill('SIGKILL');
+  }
+}
 
-    child.on('close', (code) => {
-      done({ ok: code === 0, stdout, stderr, code });
-    });
-
-    if (stdinText != null) {
-      child.stdin.on('error', () => {}); // ignore EPIPE if the process dies early
-      child.stdin.write(stdinText, 'utf8');
-    }
-    child.stdin.end();
-  });
+function spawnErrorMessage(err) {
+  return err.code === 'ENOENT'
+    ? 'Claude Code no está instalado o no está en el PATH. Instálalo desde claude.com/claude-code.'
+    : `No se pudo ejecutar Claude Code: ${err.message}`;
 }
 
 function friendlyClaudeError(raw) {
@@ -213,39 +211,172 @@ function friendlyClaudeError(raw) {
   return raw ? `Error de Claude Code: ${raw.slice(0, 300)}` : 'Error desconocido de Claude Code.';
 }
 
-// Availability check: is the CLI installed?
+// One-shot CLI run with a plain timeout (used for --version)
+function runClaudeSimple(args, timeoutMs) {
+  return new Promise((resolve) => {
+    let child;
+    try { child = spawnClaude(args); } catch (err) { resolve({ ok: false, error: spawnErrorMessage(err) }); return; }
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      killTree(child);
+      resolve({ ok: false, error: 'Claude Code no respondió a tiempo.' });
+    }, timeoutMs);
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', (err) => { clearTimeout(timer); resolve({ ok: false, error: spawnErrorMessage(err) }); });
+    child.on('close', (code) => { clearTimeout(timer); resolve({ ok: code === 0, stdout, stderr }); });
+    child.stdin.end();
+  });
+}
+
+/**
+ * Text generation through the CLI, lean: our own system prompt instead of the
+ * Claude Code agent prompt, no tools, no MCP servers, no hooks, no project
+ * CLAUDE.md (runs in a temp dir). Output is streamed (stream-json) so we can
+ * tell "never connected" from "still writing":
+ *   - no API output within CONNECT_TIMEOUT_MS → abort (can't reach Claude)
+ *   - silent for IDLE_TIMEOUT_MS once answering → abort (stalled)
+ *   - hard cap `timeoutMs` for the whole call
+ * Every abort kills the CLI process tree. Resolves { ok, text, model } or { ok: false, error }.
+ */
+async function runClaudeCall({ prompt, systemPrompt, model, timeoutMs, requestId }) {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'dialogue-forge-'));
+  const systemFile = path.join(tmp, 'system.txt');
+  const settingsFile = path.join(tmp, 'settings.json');
+  await fs.writeFile(systemFile, systemPrompt || 'You are a helpful assistant.', 'utf8');
+  await fs.writeFile(settingsFile, JSON.stringify({ disableAllHooks: true }), 'utf8');
+
+  const args = [
+    '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    '--model', model,
+    '--system-prompt-file', systemFile,
+    '--settings', settingsFile,
+    '--tools', '', '--strict-mcp-config', '--no-session-persistence',
+  ];
+  const hardMs = Math.min(MAX_CALL_TIMEOUT_MS, Math.max(30_000, Number(timeoutMs) || DEFAULT_CALL_TIMEOUT_MS));
+
+  try {
+    return await new Promise((resolve) => {
+      let child;
+      try { child = spawnClaude(args, tmp); } catch (err) { resolve({ ok: false, error: spawnErrorMessage(err) }); return; }
+
+      let settled = false;
+      let connected = false;
+      let result = null;
+      let initModel = null;
+      let buf = '';
+      let stderr = '';
+      let idleTimer = null;
+      let connectTimer = null;
+      let hardTimer = null;
+
+      const finish = (res) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(connectTimer);
+        clearTimeout(hardTimer);
+        clearTimeout(idleTimer);
+        if (requestId) activeClaudeCalls.delete(requestId);
+        resolve(res);
+      };
+      const abort = (error) => {
+        killTree(child);
+        finish({ ok: false, error, timedOut: true });
+      };
+      const armIdle = () => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => abort(`Claude dejó de responder (${IDLE_TIMEOUT_MS / 1000} s sin actividad). Se canceló la llamada.`), IDLE_TIMEOUT_MS);
+      };
+
+      connectTimer = setTimeout(() => abort(
+        `No se pudo conectar con Claude en ${CONNECT_TIMEOUT_MS / 1000} s. Revisa tu conexión a internet o la sesión de Claude Code (ejecuta "claude" en una terminal).`
+      ), CONNECT_TIMEOUT_MS);
+      hardTimer = setTimeout(() => abort(
+        `Claude tardó más de ${Math.round(hardMs / 1000)} s y se canceló la llamada. Prueba con menos nodos a la vez.`
+      ), hardMs);
+      if (requestId) activeClaudeCalls.set(requestId, () => abort('Llamada cancelada.'));
+
+      const onEvent = (ev) => {
+        if (ev.type === 'system' && ev.subtype === 'init' && ev.model) initModel = ev.model;
+        if (!connected && (ev.type === 'stream_event' || ev.type === 'assistant' || ev.type === 'result')) {
+          connected = true;
+          clearTimeout(connectTimer);
+        }
+        if (connected) armIdle();
+        if (ev.type === 'result') result = ev;
+      };
+
+      child.stdout.on('data', (d) => {
+        buf += d;
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i).trim();
+          buf = buf.slice(i + 1);
+          if (!line) continue;
+          try { onEvent(JSON.parse(line)); } catch { /* not a JSON event */ }
+        }
+      });
+      child.stderr.on('data', (d) => { stderr += d; });
+      child.on('error', (err) => finish({ ok: false, error: spawnErrorMessage(err) }));
+      child.on('close', () => {
+        if (buf.trim()) { try { onEvent(JSON.parse(buf.trim())); } catch { /* ignore */ } }
+        if (!result) {
+          finish({ ok: false, error: friendlyClaudeError(stderr || 'Claude Code terminó sin respuesta.') });
+        } else if (result.is_error || result.subtype !== 'success' || typeof result.result !== 'string') {
+          finish({ ok: false, error: friendlyClaudeError(result.result || result.subtype || stderr) });
+        } else {
+          const served = Object.keys(result.modelUsage || {});
+          finish({ ok: true, text: result.result, model: served.find((m) => m === model) || served[0] || initModel || model });
+        }
+      });
+
+      child.stdin.on('error', () => {}); // ignore EPIPE if the process dies early
+      child.stdin.write(prompt || '', 'utf8');
+      child.stdin.end();
+    });
+  } finally {
+    fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// Pinned model IDs (same mapping as normalizeClaudeModel() in src/modules/ai.js):
+// the CLI aliases "sonnet"/"opus" follow the newest release and silently move
+// to new versions when Claude Code updates ("opus" already resolves to 5.5).
+function pickClaudeModel(model) {
+  return /opus/i.test(model || '') ? 'claude-opus-5' : 'claude-sonnet-5';
+}
+
+// Availability check: is the CLI installed? (no API call, no quota used)
 ipcMain.handle('ai:claude-check', async () => {
-  const res = await runClaude(['--version'], null, 15_000);
+  const res = await runClaudeSimple(['--version'], 15_000);
   if (res.error) return { ok: false, error: res.error };
   if (!res.ok) return { ok: false, error: friendlyClaudeError(res.stderr || res.stdout) };
   return { ok: true, version: (res.stdout || '').trim() };
 });
 
-// Text generation call. All free-form content (system prompt + conversation)
-// travels via stdin to avoid Windows command-line length limits and escaping.
-ipcMain.handle('ai:claude-call', async (event, { prompt, systemPrompt, model }) => {
-  const modelArg = model && MODEL_RE.test(model) ? model : 'sonnet';
+// Real round trip with a tiny prompt: proves login + model + connectivity
+ipcMain.handle('ai:claude-test', async (event, { model } = {}) => {
+  const started = Date.now();
+  const res = await runClaudeCall({
+    prompt: 'Reply with exactly: OK',
+    systemPrompt: 'You are a connectivity check. Reply with exactly: OK',
+    model: pickClaudeModel(model),
+    timeoutMs: 90_000,
+  });
+  return res.ok ? { ok: true, model: res.model, ms: Date.now() - started } : res;
+});
 
-  let fullPrompt = prompt || '';
-  if (systemPrompt) {
-    fullPrompt = `<instructions>\n${systemPrompt}\n</instructions>\n\n${fullPrompt}`;
-  }
+// Text generation call. The system prompt goes through a temp file and the
+// conversation through stdin — no Windows command-line limits or escaping.
+ipcMain.handle('ai:claude-call', async (event, { prompt, systemPrompt, model, timeoutMs, requestId }) => {
+  return runClaudeCall({ prompt, systemPrompt, model: pickClaudeModel(model), timeoutMs, requestId });
+});
 
-  const args = ['-p', '--output-format', 'json', '--model', modelArg];
-  const res = await runClaude(args, fullPrompt);
-
-  if (res.error) return { ok: false, error: res.error };
-  if (!res.ok) return { ok: false, error: friendlyClaudeError(res.stderr || res.stdout) };
-
-  try {
-    const data = JSON.parse(res.stdout);
-    if (data.is_error || data.subtype !== 'success' || typeof data.result !== 'string') {
-      return { ok: false, error: friendlyClaudeError(data.result || data.subtype || res.stderr) };
-    }
-    return { ok: true, text: data.result };
-  } catch {
-    return { ok: false, error: 'Claude Code devolvió una respuesta no válida.' };
-  }
+ipcMain.handle('ai:claude-cancel', (event, { requestId } = {}) => {
+  const cancel = activeClaudeCalls.get(requestId);
+  if (cancel) cancel();
+  return { ok: !!cancel };
 });
 
 // ─── MCP SERVER (control the app from Claude Code / CLI) ─────

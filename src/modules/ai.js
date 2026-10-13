@@ -38,6 +38,18 @@ let config = {
   embeddingsModel: '', // empty = default multilingual model (see vector-memory.js)
 };
 
+// Claude Code models are pinned to explicit IDs: the CLI's "sonnet"/"opus"
+// aliases move to each new release (e.g. "opus" already resolves to 5.5).
+export const CLAUDE_CODE_MODELS = [
+  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+  { id: 'claude-opus-5', label: 'Opus 5' },
+];
+
+/** Any stored/legacy value (alias, 5.5 id, empty) → one of CLAUDE_CODE_MODELS. */
+export function normalizeClaudeModel(model) {
+  return /opus/i.test(model || '') ? 'claude-opus-5' : 'claude-sonnet-5';
+}
+
 export function getConfig() { return { ...config, contextFiles: [...(config.contextFiles || [])] }; }
 
 export function saveConfig(newConfig) {
@@ -59,6 +71,14 @@ export function loadConfig() {
         delete config.model;
         localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
       }
+      // Claude Code tasks: legacy aliases ("sonnet", "opus") → pinned IDs
+      let migrated = false;
+      Object.values(TASK_FIELDS).forEach((f) => {
+        if (config[f.provider] !== 'claude') return;
+        const pinned = normalizeClaudeModel(config[f.model]);
+        if (config[f.model] !== pinned) { config[f.model] = pinned; migrated = true; }
+      });
+      if (migrated) localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
     }
   } catch { /* ignore */ }
 }
@@ -154,6 +174,8 @@ function stripThinking(text) {
 }
 
 // ─── CLAUDE CODE (Electron IPC) ──────────────────────
+const CLAUDE_DEFAULT_TIMEOUT_MS = 300_000;
+
 async function callClaudeCode(messages, options = {}) {
   const api = typeof window !== 'undefined' ? window.electronAPI : null;
   if (!api || !api.claudeCall) {
@@ -178,16 +200,36 @@ async function callClaudeCode(messages, options = {}) {
       .join('\n\n');
   }
 
-  const res = await api.claudeCall({
-    prompt,
-    systemPrompt: systemParts.join('\n\n') || null,
-    model: options.model || 'sonnet',
-    maxTokens: options.maxTokens || null,
+  const model = normalizeClaudeModel(options.model);
+  const timeoutMs = options.timeoutMs || CLAUDE_DEFAULT_TIMEOUT_MS;
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const started = performance.now();
+
+  // The main process enforces connect/idle/total timeouts and kills the CLI.
+  // This is the safety net for anything above it (IPC never answering):
+  // the "IA trabajando" popup must always close.
+  let safetyTimer;
+  const safety = new Promise((_, reject) => {
+    safetyTimer = setTimeout(() => {
+      api.claudeCancel?.({ requestId }).catch(() => {});
+      reject(new Error('Claude Code no respondió a tiempo y se canceló la llamada.'));
+    }, timeoutMs + 20_000);
   });
+
+  let res;
+  try {
+    res = await Promise.race([
+      api.claudeCall({ prompt, systemPrompt: systemParts.join('\n\n') || null, model, timeoutMs, requestId }),
+      safety,
+    ]);
+  } finally {
+    clearTimeout(safetyTimer);
+  }
 
   if (!res || !res.ok) {
     throw new Error(res?.error || 'Error desconocido al llamar a Claude Code.');
   }
+  console.info(`[Claude Code] ${options.task || 'generate'} → ${res.model || model} (${Math.round(performance.now() - started)} ms)`);
 
   let content = res.text || '';
   if (config.isThinking) content = stripThinking(content);
@@ -238,7 +280,7 @@ export async function translateNode(nodeId) {
     { role: 'user', content: userContent }
   ];
 
-  const translated = await callProvider(messages, { task: 'translate' });
+  const translated = await callProvider(messages, { task: 'translate', timeoutMs: 120_000 });
   const updatedText = { ...node.text };
   updatedText.en = translated;
   State.updateNodeText(nodeId, updatedText);
@@ -281,7 +323,11 @@ export async function translateAllNodes(nodeIds = null) {
     { role: 'user', content: texts }
   ];
 
-  const result = await callProvider(messages, { task: 'translate', maxTokens: 4096 });
+  const result = await callProvider(messages, {
+    task: 'translate',
+    maxTokens: 4096,
+    timeoutMs: Math.min(600_000, 60_000 + nodesToTranslate.length * 6_000),
+  });
 
   // Parse results
   const parts = result.split('---').map((p) => p.trim());

@@ -176,10 +176,11 @@ The `ai.js` module supports two AI providers, selectable **per task** (generate 
 `callProvider(messages, { task })` is the dispatcher: it reads `config.provider{Generate,Translate,Chat}` (`'openrouter' | 'claude'`) and routes accordingly. All internal call sites go through it. All prompt templates are centralized in `prompts.js`.
 
 #### Claude Code provider (Electron main)
-- `electron/main.js` spawns `claude -p --output-format json --model <model>`; the system prompt + prompt are sent via **stdin** (avoids Windows arg-length/escaping limits). The model arg is regex-validated (`/^[a-zA-Z0-9._-]+$/`).
-- IPC handlers: `ai:claude-call` (generation), `ai:claude-check` (CLI availability). Both return `{ ok, text | error }` with friendly Spanish messages for not-logged-in / rate-limit / overload.
-- Requires the `claude` CLI on the system PATH and a logged-in session (`claude` → `/login`).
-- Model field accepts aliases: `sonnet`, `opus`, `haiku` (defaults to `sonnet`).
+- **Pinned models**: only `claude-sonnet-5` and `claude-opus-5` (`CLAUDE_CODE_MODELS` / `normalizeClaudeModel()` in `ai.js`, mirrored by `pickClaudeModel()` in `electron/main.js`). Never pass the CLI aliases: `sonnet`/`opus` follow the newest release and move silently when Claude Code updates (`opus` already resolves to Opus 5.5). Legacy configs are migrated on `loadConfig()`; the settings modal shows a Sonnet 5 / Opus 5 `<select>` for Claude Code tasks.
+- **Lean invocation** (`runClaudeCall()`): `claude -p --output-format stream-json --verbose --include-partial-messages --model <id> --system-prompt-file <tmp> --settings <tmp {disableAllHooks:true}> --tools "" --strict-mcp-config --no-session-persistence`, cwd = a temp dir (no project CLAUDE.md), parent-session env vars (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, …) stripped. Our prompt replaces Claude Code's agent prompt (~600 input tokens instead of ~29k; ~4 s per translation instead of ~10 s). The conversation goes via **stdin**; on Windows the CLI is spawned through the shell with hand-quoted args (`winQuote`).
+- **Timeouts** (the "IA trabajando" popup must always close): no API output within 60 s → "no se pudo conectar"; 90 s of silence once answering → stalled; hard cap per call (`timeoutMs` from the renderer: 2 min single translation, 60 s + 6 s/node batch up to 10 min, default 5 min). Every abort kills the process tree (`taskkill /T /F` on Windows — `child.kill()` would only kill `cmd.exe`). The renderer adds a safety net (`timeoutMs + 20 s`, then `ai:claude-cancel`). `timeoutMs` also applies to OpenRouter calls.
+- IPC handlers: `ai:claude-call` (`{prompt, systemPrompt, model, timeoutMs, requestId}` → `{ok, text, model}` where `model` is the model that actually served, from the result's `modelUsage`), `ai:claude-test` (real "OK" round trip — what "🔌 Probar conexión" runs per selected model, reporting model + latency), `ai:claude-check` (`--version`, no quota), `ai:claude-cancel` (`{requestId}`). Errors are friendly Spanish messages (not logged in / rate limit / overload / timeouts).
+- Requires the `claude` CLI on the system PATH and a logged-in session (`claude` → `/login`). Each successful call logs `[Claude Code] <task> → <model> (<ms>)` to the devtools console.
 
 ### External control via MCP
 
@@ -209,7 +210,7 @@ The `ai.js` module integrates with the OpenRouter API. All prompt templates are 
 - `buildGenerateSystemPrompt(...)` — Builds the system prompt for new dialogue generation
 - `buildExtendSystemPrompt(...)` — Builds the system prompt for extending existing dialogues
 
-Translation prompts explicitly instruct the AI to preserve profanity, slang, and vulgar language without censoring.
+**The prompts are game-agnostic** — the app must work for any game. Never hardcode a specific game's setting, cast or tone in `prompts.js`; that context comes from the user's project (NPC/quest/dialogue author notes, context files, RAG). The one fixed rule is `TONE_RULES` (shared by translation and generation): never sanitize or soften — profanity, insults, crude humor, violence and sexual content keep their exact intensity ("¿Qué carajo?" → "What the fuck?", never "What the hell?").
 
 #### Configuration (stored in localStorage)
 ```js
@@ -314,6 +315,7 @@ npm run build    # Build for production (dist/)
 - **Undo/Redo**: Ctrl+Z and Ctrl+Y are only intercepted when the user is NOT in a text input field. Inside inputs/textareas, the browser's native undo/redo works normally.
 - **NPC Colors**: Users can customize NPC colors via `<input type="color">` in the inspector. Use `State.updateNPCColor(id, color)`. Colors are stored in `npc.color`.
 - **Sidebar Sections**: Collapsible via click on section header. State saved in localStorage (`df_collapsed_sections`).
+- **Resizable Sidebar**: `#sidebar-resizer` (absolute, out of the grid flow) sits on the sidebar's right edge; dragging it updates the `--sidebar-width` CSS var that sizes the grid column (`setupSidebarResize()` in `main.js`). Clamped to [200px, window − inspector − 320px canvas], re-clamped on window resize, persisted in `localStorage df_sidebarWidth`; double-click resets to 280px. List item names carry a `title` tooltip with the full name.
 - **Session Persistence**: Active dialogue ID is saved in localStorage (`df_activeDialogueId`) and restored on app load.
 - **Unsaved Changes**: Electron main process shows a native dialog when closing with unsaved changes. Renderer exposes `window.__dialogueForgeDirty()` and `window.__dialogueForgeSave()`.
 - **Connection Reordering**: Outgoing connections can be reordered via ▲/▼ buttons in inspector. Use `State.reorderConnection(sourceId, targetId, 'up'|'down')`.

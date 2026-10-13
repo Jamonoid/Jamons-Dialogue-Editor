@@ -16,4 +16,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Claude Code (local subscription-based AI provider)
   claudeCall: (payload) => ipcRenderer.invoke('ai:claude-call', payload),
   claudeCheck: () => ipcRenderer.invoke('ai:claude-check'),
+  claudeTest: (payload) => ipcRenderer.invoke('ai:claude-test', payload),
+  claudeCancel: (payload) => ipcRenderer.invoke('ai:claude-cancel', payload),
 });

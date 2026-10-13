@@ -38,7 +38,7 @@ function buildServer(exec) {
     .describe('Hex like #61afef, or a preset: gris, rojo, naranja, amarillo, verde, azul, violeta (English names work too)');
   const commentBoxesParam = z.array(z.object({
     id: z.string().optional().describe('Existing box id (from get_dialogue/get_layout commentBoxes) to re-target around these nodes instead of creating a new box — keeps the author\'s text/color unless given'),
-    text: z.string().optional().describe('Title shown on the box (required for new boxes), e.g. "Rama: coquetear con Tama"'),
+    text: z.string().optional().describe('Title shown on the box (required for new boxes), e.g. "Rama: negociar con el mercader"'),
     nodes: z.array(z.string()).describe('Temp ids (or real ids) of the nodes this box groups'),
     color: colorParam,
   })).optional().describe('Section boxes (UE-style comments) wrapped around groups of nodes after the layout. Give each box a contiguous part of the tree — a branch, a scene, a phase of the talk: every branch gets its own column, so such boxes never overlap. Result "commentBoxes" lists what each box ended up containing (foreignNodeIds = nodes inside that you did not list).');
@@ -243,7 +243,7 @@ function buildServer(exec) {
     'Draw a UE-style comment box — a titled, colored section — on a dialogue or on the story map (dialogue_id "story"). Preferred: node_ids → the box wraps those nodes with padding (existing boxes whose nodes are all included end up nested inside). Or x/y (+ width/height, default 400×260) for a free-standing note. Nodes fully inside a box travel with it when the author drags its title. Returns nodeIds actually inside, and foreignNodeIds if the rectangle also covers nodes you did not list (the section is not contiguous — fix it with auto_layout or move_nodes, then update_comment_box(node_ids)).',
     {
       dialogue_id: graphIdParam,
-      text: z.string().describe('Title shown on the box, e.g. "Rama: coquetear con Tama"'),
+      text: z.string().describe('Title shown on the box, e.g. "Rama: negociar con el mercader"'),
       node_ids: z.array(z.string()).optional().describe('Nodes to wrap'),
       x: z.number().optional(),
       y: z.number().optional(),

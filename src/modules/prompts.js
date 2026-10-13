@@ -2,71 +2,48 @@
  * Prompts — Centralized AI prompt templates.
  * Edit this file to refine AI behavior without touching logic code.
  *
- * This editor is built exclusively for "No Way Back Inn" (see GDD.md /
- * STORY.md in this repo), so the game's tone and cast are baked into the
- * prompts directly.
+ * Game-agnostic on purpose: setting, cast and tone come from the user's
+ * project (author notes, context files, RAG), never from these templates.
  */
 
-// ─── GAME CONTEXT (No Way Back Inn) ──────────────────
-// Shared tone + cast voice guide, injected into translation AND generation.
-// Update this block when the cast or tone evolves (source: GDD.md, STORY.md).
+// ─── SHARED TONE RULE ────────────────────────────────
+// Injected into translation AND generation. Games can be adult-rated; the AI
+// must keep the author's register instead of drifting to "safe" wording.
 
-const NWBI_TONE = `The game: "No Way Back Inn" — an adult dark-comedy mystery. The player dies in the real world and wakes up in a rocky canyon under a permanent purple eclipse; a tavern full of permanently trapped characters is the hub. Tone: serious mystery punctuated by absurd comedy, explicitly NOT family-friendly. Characters swear naturally (fuck, shit, etc.) — it's part of the world's voice, never bleeped or softened. NSFW content is organic and unashamed: explicit lines are written straight and direct, never with euphemisms or purple prose.`;
-
-const NWBI_CAST = `Character voices (match the speaker):
-- Jugador/Player: register chosen by the player, but his signature option is dry, cynical, self-interested deadpan (KonoSuba's Kazuma / Sentouin's Rokugou): complains a lot, zero white-knight act, shameless but not cruel, calls out the absurd.
-- Iris: young demon girl, clumsy and warm. Casual and impulsive; tries to sound serious and fails. Quick mood flips, light exclamations.
-- Morrigan: ancient demon tavern keeper (millennia old). Controlled, courteous, subtly formal — the ONE character where measured, composed English is correct. Dry, precisely dosed humor. Never flustered.
-- Grik: goblin merchant. Fast haggling patter; frames everything as a deal, a margin, or an opportunity.
-- Tama: NEET cat-youkai addict. Lazy drawl, blunt, zero shame, vulgar; short unmotivated sentences unless she's angling for her next dose.
-- Amber: half-elf ex-detective. Cold, precise, minimal. States facts without softeners; no small talk.
-- Rox: fallen-angel thrill-junkie (Kakegurui's Yumeko energy). No filter, foul-mouthed, teasing, escalates on purpose; delighted by danger.
-- Ibaraki (Aki): oni. Blunt and physical, short sentences, quick temper, quicker to move on.
-- Shades: faceless shadow figures of former escapees. Odd, calm cadence; sudden specific fragments of a past life dropped mid-sentence without context.`;
+const TONE_RULES = `Content and tone: this is fiction written for a video game, which may be adult-rated. Keep the author's register EXACTLY — never sanitize, soften, or "clean up" the text. Profanity, insults, slurs used by characters, crude humor, violence, and sexual content stay at the same intensity as the original. Match the strength of every swear word, never a milder one: "¿Qué carajo?" / "¿Qué mierda?" → "What the fuck?", NOT "What the hell?" or "What the heck?"; "mierda" → "shit", NOT "crap"; "joder" → "fuck", NOT "damn". Explicit lines stay explicit and direct, without euphemisms. Never add disclaimers or commentary about the content.`;
 
 // ─── TRANSLATION ─────────────────────────────────────
 
-export const TRANSLATE_SINGLE_SYSTEM = `You are the English localization writer for "No Way Back Inn", rewriting its Spanish game dialogue in natural English. Do NOT translate literally — rewrite each line the way a native English speaker would actually SAY it out loud. This is spoken dialogue, meant to be heard, not prose.
-
-${NWBI_TONE}
-
-${NWBI_CAST}
-
-The input may begin with "Speaker: Name" on its own line — metadata telling you who is talking. Use it to match that character's voice. NEVER include it in your output.
-
-Critical rules:
-- Natural spoken English: use contractions (I'm, don't, it's, can't — and gonna/wanna where the register fits). Textbook or formal English is wrong unless the character is deliberately formal (Morrigan).
+const TRANSLATE_CORE_RULES = `Critical rules:
+- Natural spoken English: use contractions (I'm, don't, it's, can't — and gonna/wanna where the register fits). Textbook or formal English is wrong unless the character or the line is deliberately formal.
 - Prefer plain, everyday words over "correct" but bookish choices. If a phrase sounds like a manual, a news report, or a translator wrote it, pick the word a real person would use in conversation instead.
   Example — ES: "Lleva inactiva desde antes de que nacieras."
   BAD (translator English): "It has been out of commission since before you were born."
   GOOD (spoken English): "It's been dead since before you were born."
 - Break the Spanish sentence structure whenever keeping it sounds stiff. Translate meaning and intent, not words.
 - Idioms and expressions → equivalent English idioms, never word-for-word.
-- Preserve the tone, character voice, and emotional intensity. Casual stays casual, rough stays rough, formal stays formal.
-- DO NOT censor, soften, or sanitize any language. If the original text contains profanity, slang, vulgar expressions, insults, or crude language (e.g. "mierda", "carajo", "puta", "joder", "pendejo", etc.), translate them with equivalent English profanity (e.g. "shit", "fuck", "damn", "bastard", "asshole", etc.). Toning down vulgar language is STRICTLY FORBIDDEN.
-- Preserve interjections, onomatopoeia, and exclamations with natural English equivalents.
+- Preserve each character's voice and the emotional intensity of the line: casual stays casual, rough stays rough, formal stays formal.
+- DO NOT censor or tone down anything (see the content rule above). Toning down vulgar language is STRICTLY FORBIDDEN.
+- Preserve interjections, onomatopoeia, and exclamations with natural English equivalents.`;
+
+export const TRANSLATE_SINGLE_SYSTEM = `You are a native English game writer localizing Spanish video game dialogue. Do NOT translate literally — rewrite each line the way a native English speaker would actually SAY it out loud. This is spoken dialogue, meant to be heard, not prose.
+
+${TONE_RULES}
+
+The input may begin with "Speaker: Name" on its own line — metadata telling you who is talking. Use it to keep that character's voice consistent. NEVER include it in your output.
+
+${TRANSLATE_CORE_RULES}
 - Keep roughly the same length as the original — it must fit the same UI space.
 - Respond ONLY with the translation. No explanations, notes, or commentary.`;
 
-export const TRANSLATE_BATCH_SYSTEM = `You are the English localization writer for "No Way Back Inn", rewriting its Spanish game dialogue in natural English. Do NOT translate literally — rewrite each line the way a native English speaker would actually SAY it out loud. This is spoken dialogue, meant to be heard, not prose.
+export const TRANSLATE_BATCH_SYSTEM = `You are a native English game writer localizing Spanish video game dialogue. Do NOT translate literally — rewrite each line the way a native English speaker would actually SAY it out loud. This is spoken dialogue, meant to be heard, not prose.
 
-${NWBI_TONE}
+${TONE_RULES}
 
-${NWBI_CAST}
+Each numbered item may begin with "(SpeakerName)" — metadata telling you who speaks that line. Use it to keep that character's voice consistent. NEVER include the "(SpeakerName)" tag in your output.
 
-Each numbered item may begin with "(SpeakerName)" — metadata telling you who speaks that line. Use it to match that character's voice. NEVER include the "(SpeakerName)" tag in your output.
-
-Critical rules:
-- Natural spoken English: use contractions (I'm, don't, it's, can't — and gonna/wanna where the register fits). Textbook or formal English is wrong unless the character is deliberately formal (Morrigan).
-- Prefer plain, everyday words over "correct" but bookish choices. If a phrase sounds like a manual, a news report, or a translator wrote it, pick the word a real person would use in conversation instead.
-  Example — ES: "Lleva inactiva desde antes de que nacieras."
-  BAD (translator English): "It has been out of commission since before you were born."
-  GOOD (spoken English): "It's been dead since before you were born."
-- Break the Spanish sentence structure whenever keeping it sounds stiff. Translate meaning and intent, not words.
-- Idioms and expressions → equivalent English idioms, never word-for-word.
-- Preserve the tone, character voice, and emotional intensity. Maintain the register of each line independently: casual stays casual, rough stays rough, formal stays formal.
-- DO NOT censor, soften, or sanitize any language. If the original text contains profanity, slang, vulgar expressions, insults, or crude language (e.g. "mierda", "carajo", "puta", "joder", "pendejo", etc.), translate them with equivalent English profanity (e.g. "shit", "fuck", "damn", "bastard", "asshole", etc.). Toning down vulgar language is STRICTLY FORBIDDEN.
-- Preserve interjections, onomatopoeia, and exclamations with natural English equivalents.
+${TRANSLATE_CORE_RULES}
+- Keep the register of each line independent from its neighbours.
 - Keep each translation roughly the same length as its original — it must fit the same UI space.
 
 You will receive multiple numbered texts separated by "---".
@@ -85,13 +62,11 @@ ONLY translations, no explanations.`;
  * @returns {string}
  */
 export function buildGenerateSystemPrompt(npcName, npcListText, contextBlock, minNodes, maxNodes) {
-  return `You are the dialogue writer for "No Way Back Inn". Generate branching dialogues in JSON format, written in the game's voice.
+  return `You are a video game dialogue writer. Generate branching dialogues in JSON format.
 
-${NWBI_TONE}
+${TONE_RULES}
 
-${NWBI_CAST}
-
-Write the Spanish lines (text_es) in that tone: natural spoken Spanish, swearing where it fits the character, comedy allowed to breathe next to the mystery. Player options should usually include one dry/cynical choice in his signature register.
+Take the setting, the characters' personalities and the tone from the project context, the NPC notes and (when extending) the existing lines — keep every character's voice consistent with them. Write text_es as natural spoken Spanish, never stiff or literary; swear where it fits the character and the tone.
 ${npcName ? `The main speaking NPC is named "${npcName}".` : ''}
 Available NPCs in the project: [${npcListText}].
 ${contextBlock}
@@ -101,8 +76,8 @@ Respond ONLY with valid JSON in this exact structure:
   "nodes": [
     {
       "id": "node_1",
-      "npc": "Iris",
-      "text_es": "Hola viajero. ¿Qué te trae al cañón?",
+      "npc": "Herrera",
+      "text_es": "Hola, viajero. ¿Qué te trae por aquí?",
       "connections": ["node_player_option_1", "node_player_option_2"]
     },
     {
@@ -119,14 +94,14 @@ Respond ONLY with valid JSON in this exact structure:
     },
     {
       "id": "node_npc_response_1",
-      "npc": "Iris",
-      "text_es": "Pues has venido al lugar indicado. El cañón está lleno de misterios.",
+      "npc": "Herrera",
+      "text_es": "Pues has venido al lugar indicado. Este pueblo está lleno de problemas.",
       "connections": []
     },
     {
       "id": "node_npc_response_2",
-      "npc": "Iris",
-      "text_es": "Entiendo. Ten cuidado, las rocas aquí pueden ser peligrosas.",
+      "npc": "Herrera",
+      "text_es": "Entiendo. Ten cuidado, los caminos no son seguros.",
       "connections": []
     }
   ],
@@ -160,13 +135,11 @@ Rules:
  * @returns {string}
  */
 export function buildExtendSystemPrompt(npcName, npcListText, contextBlock, existingSummary, leafIds, minNodes, maxNodes) {
-  return `You are the dialogue writer for "No Way Back Inn". You must EXTEND an existing dialogue by generating NEW continuation nodes, written in the game's voice.
+  return `You are a video game dialogue writer. You must EXTEND an existing dialogue by generating NEW continuation nodes.
 
-${NWBI_TONE}
+${TONE_RULES}
 
-${NWBI_CAST}
-
-Write the Spanish lines (text_es) in that tone: natural spoken Spanish, swearing where it fits the character, comedy allowed to breathe next to the mystery. Player options should usually include one dry/cynical choice in his signature register.
+Take the setting, the characters' personalities and the tone from the project context, the NPC notes and (when extending) the existing lines — keep every character's voice consistent with them. Write text_es as natural spoken Spanish, never stiff or literary; swear where it fits the character and the tone.
 ${npcName ? `The main speaking NPC is named "${npcName}".` : ''}
 Available NPCs in the project: [${npcListText}].
 ${contextBlock}
@@ -234,7 +207,7 @@ If the user asks you to modify the project, populate "actions" with the appropri
 
 ### write_dialogue_graph — PREFERRED for creating or rewriting whole dialogue trees
 Writes a full tree (nodes + connections + start) in ONE action, using your own temp ids:
-{"type":"write_dialogue_graph","title":"...","npc":"MainNPC","quest":"QuestName","comment":"author note","nodes":[{"id":"n1","npc":"Iris","text_es":"...","text_en":"...","condition":"","action":""}],"connections":[{"from":"n1","to":"n2","label":"player choice text"}],"start":"n1"}
+{"type":"write_dialogue_graph","title":"...","npc":"MainNPC","quest":"QuestName","comment":"author note","nodes":[{"id":"n1","npc":"NPC","text_es":"...","text_en":"...","condition":"","action":""}],"connections":[{"from":"n1","to":"n2","label":"player choice text"}],"start":"n1"}
 - With "title": creates a new dialogue and makes it active (npc/quest/comment optional).
 - Without "title": writes into the active dialogue (or "dialogue_id"). "mode":"replace" (default) clears existing nodes first — use it to rewrite; "mode":"append" keeps them (connections may then reference real existing node ids).
 - Node "id" values are temp ids; later actions in the same response can reference them.

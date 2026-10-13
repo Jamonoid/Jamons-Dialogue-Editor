@@ -59,7 +59,7 @@ function renderNPCs() {
     <li class="section-list-item" draggable="true" data-type="npc" data-id="${n.id}">
       <span class="item-drag-handle" title="Arrastrar para reordenar">⠿</span>
       <span class="item-icon npc-icon">N</span>
-      <span class="item-name">${esc(n.name)}</span>
+      <span class="item-name" title="${esc(n.name)}">${esc(n.name)}</span>
       <button class="item-delete" data-delete="npc" data-id="${n.id}" title="Eliminar">×</button>
     </li>
   `
@@ -84,7 +84,7 @@ function renderQuests() {
     <li class="section-list-item" draggable="true" data-type="quest" data-id="${q.id}">
       <span class="item-drag-handle" title="Arrastrar para reordenar">⠿</span>
       <span class="item-icon quest-icon">Q</span>
-      <span class="item-name">${esc(q.name)}</span>
+      <span class="item-name" title="${esc(q.name)}">${esc(q.name)}</span>
       <button class="item-delete" data-delete="quest" data-id="${q.id}" title="Eliminar">×</button>
     </li>
   `
@@ -103,7 +103,7 @@ function dialogueItemHTML(d, index, activeId, npcById, draggable) {
     <li class="section-list-item ${activeId === d.id ? 'active' : ''}" ${draggable ? 'draggable="true"' : ''} data-type="dialogue" data-id="${d.id}" data-index="${index}">
       ${draggable ? '<span class="item-drag-handle" title="Arrastrar para reordenar">⠿</span>' : ''}
       <span class="item-icon dialogue-icon"${npcColor ? ` style="background:${npcColor}20;color:${npcColor};border-color:${npcColor}33"` : ''}>D</span>
-      <span class="item-name">${esc(d.title)}${showNpc ? ` <span style="color:var(--text-muted);font-size:11px">· ${esc(npc.name)}</span>` : ''}</span>
+      <span class="item-name" title="${esc(d.title)}">${esc(d.title)}${showNpc ? ` <span style="color:var(--text-muted);font-size:11px">· ${esc(npc.name)}</span>` : ''}</span>
       <button class="item-delete" data-delete="dialogue" data-id="${d.id}" title="Eliminar">×</button>
     </li>`;
 }

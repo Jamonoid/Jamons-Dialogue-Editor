@@ -1,7 +1,8 @@
 /**
  * UI utilities — modals, toasts, context menus.
  */
-import { $ } from '../utils/helpers.js';
+import { $, esc } from '../utils/helpers.js';
+import { CLAUDE_CODE_MODELS, normalizeClaudeModel } from './ai.js';
 
 // ─── TOAST ───────────────────────────────────────────
 export function toast(msg, type = 'info') {
@@ -213,7 +214,7 @@ export function showAISettingsModal(config, onSave) {
     { key: 'translate', label: 'Traducción', orPlaceholder: 'google/gemini-2.5-flash', orHint: 'Usado para traducir ES → EN. Un modelo rápido y barato funciona bien.' },
     { key: 'chat', label: 'Chat Asistente', orPlaceholder: 'google/gemini-2.5-flash', orHint: 'Usado para el chat integrado de IA.' },
   ];
-  const CLAUDE_HINT = 'Usa tu suscripción de Claude (CLI de Claude Code instalado y logueado). Elige un alias de la lista o escribe otro.';
+  const CLAUDE_HINT = 'Usa tu suscripción de Claude (CLI de Claude Code instalado y logueado). Versión fijada: no cambia sola al actualizar Claude Code.';
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
   // Model suggestions per provider (free text still allowed — these feed <datalist>)
@@ -223,7 +224,6 @@ export function showAISettingsModal(config, onSave) {
     'openai/gpt-4o-mini', 'openai/gpt-4o',
     'deepseek/deepseek-chat', 'meta-llama/llama-3.3-70b-instruct',
   ];
-  const CLAUDE_MODELS = ['sonnet', 'opus', 'haiku'];
   // Ordered by retrieval quality (multilingual/ES). Big models are practical
   // thanks to WebGPU; on CPU-only machines the small ones are the safe picks.
   const EMB_MODELS = [
@@ -240,6 +240,9 @@ export function showAISettingsModal(config, onSave) {
   const taskRowsHTML = TASK_ROWS.map((t) => {
     const provider = config[`provider${cap(t.key)}`] || 'openrouter';
     const isClaude = provider === 'claude';
+    const stored = config[`model${cap(t.key)}`] || '';
+    const claudeModel = normalizeClaudeModel(stored);
+    // Claude Code: fixed choice of pinned models. OpenRouter: free-text model id.
     return `
       <div class="field-group">
         <label class="field-label">${t.label}</label>
@@ -248,8 +251,11 @@ export function showAISettingsModal(config, onSave) {
             <option value="openrouter" ${!isClaude ? 'selected' : ''}>OpenRouter</option>
             <option value="claude" ${isClaude ? 'selected' : ''}>Claude Code</option>
           </select>
-          <input class="field-input" type="text" id="ai-model-${t.key}" value="${config[`model${cap(t.key)}`] || ''}"
-            placeholder="${isClaude ? 'sonnet' : t.orPlaceholder}" list="${isClaude ? 'dl-claude-models' : 'dl-or-models'}" style="flex:1">
+          <input class="field-input" type="text" id="ai-model-${t.key}" value="${isClaude ? '' : esc(stored)}"
+            placeholder="${t.orPlaceholder}" list="dl-or-models" style="flex:1;${isClaude ? 'display:none' : ''}">
+          <select class="field-input" id="ai-claude-model-${t.key}" style="flex:1;${isClaude ? '' : 'display:none'}">
+            ${CLAUDE_CODE_MODELS.map((m) => `<option value="${m.id}" ${m.id === claudeModel ? 'selected' : ''}>${m.label} (${m.id})</option>`).join('')}
+          </select>
         </div>
         <span class="field-hint" id="ai-hint-${t.key}">${isClaude ? CLAUDE_HINT : t.orHint}</span>
       </div>`;
@@ -259,7 +265,6 @@ export function showAISettingsModal(config, onSave) {
     <div class="modal-header"><h3>⚙ Configuración de IA</h3></div>
     <div class="modal-body ai-settings-body">
       ${datalist('dl-or-models', OR_MODELS)}
-      ${datalist('dl-claude-models', CLAUDE_MODELS)}
       ${datalist('dl-emb-models', EMB_MODELS)}
 
       <div class="field-group">
@@ -335,9 +340,8 @@ export function showAISettingsModal(config, onSave) {
   const applyProviderUI = (t) => {
     const select = $(`#ai-provider-${t.key}`);
     const isClaude = select.value === 'claude';
-    const modelInput = $(`#ai-model-${t.key}`);
-    modelInput.placeholder = isClaude ? 'sonnet' : t.orPlaceholder;
-    modelInput.setAttribute('list', isClaude ? 'dl-claude-models' : 'dl-or-models');
+    $(`#ai-model-${t.key}`).style.display = isClaude ? 'none' : '';
+    $(`#ai-claude-model-${t.key}`).style.display = isClaude ? '' : 'none';
     $(`#ai-hint-${t.key}`).textContent = isClaude ? CLAUDE_HINT : t.orHint;
   };
   TASK_ROWS.forEach((t) => {
@@ -388,12 +392,20 @@ export function showAISettingsModal(config, onSave) {
 
       if (usesCl) {
         const api = window.electronAPI;
-        if (!api || !api.claudeCheck) {
+        if (!api || !api.claudeTest) {
           toast('Claude Code solo funciona en la app de escritorio (Electron).', 'error');
         } else {
-          const res = await api.claudeCheck().catch(() => null);
-          if (res?.ok) toast(`Claude Code disponible ✓ (${res.version || 'CLI detectado'})`, 'success');
-          else toast(res?.error || 'Claude Code no está disponible.', 'error');
+          // Real round trip per selected model: proves login, model access and connectivity
+          const models = [...new Set(TASK_ROWS
+            .filter((t) => $(`#ai-provider-${t.key}`).value === 'claude')
+            .map((t) => $(`#ai-claude-model-${t.key}`).value))];
+          for (const model of models) {
+            const label = CLAUDE_CODE_MODELS.find((m) => m.id === model)?.label || model;
+            btn.textContent = `⏳ Probando ${label}...`;
+            const res = await api.claudeTest({ model }).catch((err) => ({ ok: false, error: err.message }));
+            if (res?.ok) toast(`Claude Code ✓ ${label} respondió en ${(res.ms / 1000).toFixed(1)} s (${res.model})`, 'success');
+            else toast(`Claude Code (${label}): ${res?.error || 'no disponible'}`, 'error');
+          }
         }
       }
 
@@ -465,11 +477,14 @@ export function showAISettingsModal(config, onSave) {
 
   $('#modal-confirm').onclick = () => {
     const usesClaude = TASK_ROWS.some((t) => $(`#ai-provider-${t.key}`).value === 'claude');
+    const modelFor = (key) => ($(`#ai-provider-${key}`).value === 'claude'
+      ? $(`#ai-claude-model-${key}`).value
+      : $(`#ai-model-${key}`).value.trim());
     onSave({
       apiKey: $('#ai-api-key').value.trim(),
-      modelGenerate: $('#ai-model-generate').value.trim(),
-      modelTranslate: $('#ai-model-translate').value.trim(),
-      modelChat: $('#ai-model-chat').value.trim(),
+      modelGenerate: modelFor('generate'),
+      modelTranslate: modelFor('translate'),
+      modelChat: modelFor('chat'),
       providerGenerate: $('#ai-provider-generate').value,
       providerTranslate: $('#ai-provider-translate').value,
       providerChat: $('#ai-provider-chat').value,

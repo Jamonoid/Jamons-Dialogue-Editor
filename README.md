@@ -41,6 +41,7 @@ Editor visual de árboles de diálogo construido para desarrollo de videojuegos.
 - **Notas del autor**: cada NPC, quest y diálogo admite una nota de contexto (p. ej. "Diálogo que se ejecuta al final de la quest X") que se expone a la IA en el chat, la generación, la memoria vectorial (RAG) y las herramientas MCP
 - **Agrupar, ordenar y filtrar diálogos**: agrupa la lista por NPC o por Quest, ordena por orden manual o título (A→Z / Z→A) y filtra por texto (título, NPC o Quest). Las preferencias de agrupación y orden se recuerdan entre sesiones
 - Reordenamiento de la lista mediante arrastrar y soltar (en modo manual sin agrupar)
+- **Barra lateral redimensionable**: arrastra su borde derecho para ensancharla y leer nombres largos (doble clic vuelve al ancho original; el ancho se recuerda entre sesiones). Pasar el ratón sobre un elemento muestra su nombre completo
 - Guardar/cargar proyectos como archivos `.json` con auto-guardado en localStorage
 - Exportar/importar para respaldo y control de versiones
 
@@ -53,7 +54,8 @@ Editor visual de árboles de diálogo construido para desarrollo de videojuegos.
 ### Integración de IA (multi-proveedor)
 - **Dos proveedores, seleccionables por tarea**:
   - **OpenRouter** — API HTTP, requiere API key, pago por token, acceso a cientos de modelos
-  - **Claude Code** — usa el CLI `claude` instalado localmente con tu suscripción Claude
+  - **Claude Code** — usa el CLI `claude` instalado localmente con tu suscripción Claude. Modelos fijados a **Sonnet 5** u **Opus 5** (no cambian solos al actualizar Claude Code). Si Claude no responde, la llamada se cancela sola (60 s sin conectar, 90 s sin actividad o un máximo por tarea), así el aviso de "IA trabajando" nunca se queda colgado. "🔌 Probar conexión" hace una llamada real y muestra qué modelo respondió y en cuánto tiempo
+- **Prompts genéricos**: sirven para cualquier juego — el mundo, los personajes y el tono salen de tus notas del autor y archivos de contexto. La única regla fija: la IA nunca suaviza el tono (las groserías, la violencia y el contenido adulto se mantienen con la misma intensidad: "¿Qué carajo?" → "What the fuck?", no "What the hell?")
 - **Generación de diálogos**: Describe una conversación y la IA crea un árbol de diálogo ramificado completo con nodos y conexiones
 - **Extensión de diálogos**: Extiende diálogos existentes desde nodos hoja
 - **Traducción**: Traduce nodos individuales o diálogos completos
@@ -202,7 +204,7 @@ Los proyectos se guardan como JSON con la siguiente estructura:
     "nodes": [{
       "id": "...",
       "questId": "...",
-      "text": { "es": "El jugador despierta y conoce a Iris...", "en": "" },
+      "text": { "es": "El jugador llega al pueblo y conoce a la herrera...", "en": "" },
       "x": 100, "y": 200,
       "connections": [{ "targetId": "...", "label": "Condición para que empiece la siguiente quest" }]
     }]

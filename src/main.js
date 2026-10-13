@@ -305,10 +305,64 @@ function setupKeyboard() {
   });
 }
 
+// ─── RESIZABLE SIDEBAR ───────────────────────────────
+const SIDEBAR_DEFAULT_W = 280; // = --sidebar-width in style.css
+const SIDEBAR_MIN_W = 200;
+const CANVAS_MIN_W = 320;      // the canvas never gets squeezed below this
+
+function setupSidebarResize() {
+  const handle = $('#sidebar-resizer');
+  if (!handle) return;
+
+  // The width the user asked for; the applied width is clamped to the window,
+  // so it comes back when the window grows again
+  let wanted = SIDEBAR_DEFAULT_W;
+  try { wanted = parseInt(localStorage.getItem('df_sidebarWidth'), 10) || SIDEBAR_DEFAULT_W; } catch (e) {}
+
+  const apply = () => {
+    const inspectorW = $('#inspector')?.offsetWidth || 320;
+    const max = Math.max(SIDEBAR_MIN_W, window.innerWidth - inspectorW - CANVAS_MIN_W);
+    const w = Math.round(Math.min(max, Math.max(SIDEBAR_MIN_W, wanted)));
+    document.documentElement.style.setProperty('--sidebar-width', w + 'px');
+  };
+  const persist = () => {
+    try { localStorage.setItem('df_sidebarWidth', String(wanted)); } catch (e) {}
+  };
+
+  handle.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    document.body.classList.add('resizing-sidebar');
+    const onMove = (ev) => {
+      wanted = ev.clientX; // the sidebar starts at the window's left edge
+      apply();
+    };
+    const onUp = () => {
+      document.body.classList.remove('resizing-sidebar');
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      wanted = $('#sidebar').offsetWidth; // remember what was actually applied
+      persist();
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+
+  handle.addEventListener('dblclick', () => {
+    wanted = SIDEBAR_DEFAULT_W;
+    apply();
+    persist();
+  });
+
+  window.addEventListener('resize', apply);
+  apply();
+}
+
 // ─── INIT ────────────────────────────────────────────
 function init() {
   State.load();
   setupToolbar();
+  setupSidebarResize();
   Sidebar.setupAddButtons();
   Canvas.setup();
   // Register auto-layout callback so AI can trigger layout without circular import
